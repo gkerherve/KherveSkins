@@ -32,6 +32,7 @@
 //   think about. The toggle beside the thumbnails fixes it in one tap.
 
 import { skinish } from './photo.js';
+import { headOf } from './carve.js';
 
 /** Sort the way a person would: photo2 before photo10. */
 export function naturalOrder(names) {
@@ -43,34 +44,44 @@ export function naturalOrder(names) {
 /**
  * How much of the head is FACE.
  *
- * Counted inside the silhouette only, over the top band of it, so hair,
- * background and shoulders are all out of it. Facing the camera this is high;
- * facing away it is nearly nothing, because the back of a head is hair. In
- * profile it lands in between, which is what makes the peak findable.
+ * Counted inside the HEAD's own band — found by the neck pinch, wherever that
+ * sits — and then over the lower two-thirds of it, which is eyes to chin.
+ * Hair, background and shoulders are all out of it. Facing the camera this is
+ * high; facing away it is nearly nothing, because the back of a head is hair.
+ * In profile it lands in between, which is what makes the peak findable.
  *
  * Also returns where that skin sits ACROSS the head, which is the only clue
  * available to which way the turn went.
+ *
+ * **Measured against the head, never against the frame.** Written as "the top
+ * sixth of the outline" this worked on a standing figure and failed silently
+ * on a head-and-shoulders portrait, where the top sixth of the outline is
+ * scalp: the score was hair either way, the offset was noise, and the noise
+ * chose which way the person had turned. That is a mirror image of somebody
+ * handed back with no warning, off a number nobody could see.
  */
 export function faceScore(photo, sil) {
   if (!sil || sil.h < 8) return { score: 0, offset: 0 };
-  const y0 = sil.y + Math.round(sil.h * 0.02);
-  const y1 = sil.y + Math.round(sil.h * 0.17);
-  const step = Math.max(1, Math.round(sil.h / 160));
+  const head = headOf(sil) || sil;
+  const y0 = head.y + Math.round(head.h * 0.30);
+  const y1 = head.y + Math.round(head.h * 0.95);
+  const step = Math.max(1, Math.round(head.h / 90));
   let skin = 0, all = 0, sum = 0;
   for (let y = y0; y < y1; y += step) {
-    for (let x = sil.x; x < sil.x + sil.w; x += step) {
-      if (x < 0 || y < 0 || x >= sil.mw || y >= sil.mh) continue;
-      if (!sil.mask[y * sil.mw + x]) continue;
+    for (let x = head.x; x < head.x + head.w; x += step) {
+      if (x < 0 || y < 0 || x >= head.mw || y >= head.mh) continue;
+      if (!head.mask[y * head.mw + x]) continue;
       all++;
       const c = photo.px(x, y);
       if (skinish(c[0], c[1], c[2])) { skin++; sum += x; }
     }
   }
   if (!all) return { score: 0, offset: 0 };
-  const centre = sil.x + sil.w / 2;
+  const centre = head.x + head.w / 2;
   return {
     score: skin / all,
-    offset: skin ? (sum / skin - centre) / sil.w : 0,
+    offset: skin ? (sum / skin - centre) / head.w : 0,
+    head,
   };
 }
 
@@ -132,9 +143,12 @@ export function assignAngles(shots, o = {}) {
     const reach = Math.max(1, Math.floor(n / 4));
     let lean = 0, seen = 0;
     for (let k = 1; k <= reach; k++) {
-      const nxt = faces[(front + k) % n].offset || 0;
-      const prv = faces[(front - k + n * 2) % n].offset || 0;
-      lean += nxt - prv;
+      const a = faces[(front + k) % n], b = faces[(front - k + n * 2) % n];
+      // Both views need enough skin for "where the skin is" to mean anything.
+      // A view with four skin pixels in it has an offset, and the offset is
+      // wherever those four pixels happened to fall.
+      if (a.score < 0.08 || b.score < 0.08) continue;
+      lean += (a.offset || 0) - (b.offset || 0);
       seen++;
     }
     if (seen && Math.abs(lean / seen) > 0.035) dir = lean >= 0 ? 1 : -1;
@@ -143,7 +157,7 @@ export function assignAngles(shots, o = {}) {
   return shots.map((s, i) => {
     const k = ((i - front) % n + n) % n;
     const angle = ((dir * k * step) % 360 + 360) % 360;
-    return { ...s, angle, front: i === front, face: faces[i].score };
+    return { ...s, angle, front: i === front, face: faces[i].score, head: faces[i].head };
   });
 }
 
@@ -159,13 +173,31 @@ export function checkSet(assigned) {
   const notes = [];
   if (assigned.length < 3) {
     notes.push('three photographs at least — a front, a side and a back');
-    return { ok: false, notes };
+    return { ok: false, notes, portrait: false };
   }
   const widths = assigned.map((a) => a.sil.w / Math.max(1, a.sil.h));
   const lo = Math.min(...widths), hi = Math.max(...widths);
   if (hi / lo < 1.12) {
     notes.push('every photograph is the same width — did the turns happen?');
   }
+
+  // HOW IT WAS FRAMED, which the program has to work out rather than assume.
+  //
+  // Somebody who wants a face photographs a face: head and shoulders, near
+  // enough to see it. Somebody who wants a body stands back and gets the lot.
+  // Those are two different pictures and only one of them has legs in it, so
+  // asking the second question of the first — where are his hips, where is the
+  // floor — gets an answer, and the answer is nonsense.
+  //
+  // Told apart by how much of the outline the head takes up. A standing figure
+  // is about seven heads tall, so its head is an eighth of the outline; a
+  // head-and-shoulders portrait is a third of it or more. Anything past a
+  // quarter is not a whole person and there is no sense pretending otherwise.
+  const share = assigned
+    .map((a) => (a.head ? a.head.h / Math.max(1, a.sil.h) : 0))
+    .sort((x, y) => x - y)[Math.floor(assigned.length / 2)];
+  const portrait = share > 0.26;
+
   if (assigned.length < 6) notes.push(`${assigned.length} turns works, but more fills it out`);
-  return { ok: true, notes };
+  return { ok: true, notes, portrait, headShare: share };
 }

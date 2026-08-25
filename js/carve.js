@@ -257,6 +257,83 @@ function bounds(mask, w, h) {
 }
 
 /**
+ * How WIDE the outline is on each row — left edge to right edge, not the count
+ * of pixels between them.
+ *
+ * The distinction is the difference between finding a neck and finding an eye.
+ * A mask is never solid: a dark eye against a dark doorway, a shadow under a
+ * chin, a pair of glasses — any of them can come out as room, and each leaves
+ * a hole. Counting pixels, a row with two eyes punched out of it is "narrow",
+ * and narrow is exactly what a neck looks like. Measured edge to edge a hole
+ * changes nothing, because a face with holes in it is still as wide as a face.
+ *
+ * This cost an afternoon: three views of a test figure reported a head thirty
+ * pixels tall and the other five reported a hundred and twenty, and the three
+ * were precisely the ones with eyes in them.
+ */
+function rowWidths(sil) {
+  const rows = new Int32Array(sil.h);
+  const xa = Math.max(0, sil.x), xb = Math.min(sil.mw, sil.x + sil.w);
+  for (let j = 0; j < sil.h; j++) {
+    const y = sil.y + j;
+    if (y < 0 || y >= sil.mh) continue;
+    let lo = -1, hi = -1;
+    for (let x = xa; x < xb; x++) {
+      if (!sil.mask[y * sil.mw + x]) continue;
+      if (lo < 0) lo = x;
+      hi = x;
+    }
+    rows[j] = lo < 0 ? 0 : hi - lo + 1;
+  }
+  return rows;
+}
+
+/**
+ * Where the neck is, as a row of the outline — found as a PINCH, at whatever
+ * depth it happens to sit.
+ *
+ * Walking down from the crown, the neck is the first row that is much
+ * narrower than the widest thing above it and widens again just below. Both
+ * halves of that are needed. Without "narrower than above", the taper at the
+ * very top of the skull qualifies and the band is a cap. Without "widens
+ * below", a head photographed with no shoulders in the frame at all has its
+ * chin taken for a neck.
+ *
+ * Measuring against the widest row ABOVE rather than against a fixed number
+ * is what makes it work at any framing and any distance: it is a ratio, so a
+ * head sixty pixels tall and a head six hundred pixels tall pinch by the same
+ * amount.
+ */
+function neckRow(rows, h) {
+  const top = Math.max(2, Math.round(h * 0.06));
+  const bottom = Math.round(h * 0.80);
+  const reach = Math.max(3, Math.round(h * 0.16));
+  let above = 0;
+  for (let j = 0; j < top; j++) above = Math.max(above, rows[j]);
+
+  for (let j = top; j < bottom; j++) {
+    above = Math.max(above, rows[j - 1]);
+    if (above < 4 || !rows[j]) continue;
+    if (rows[j] > above * 0.62) continue;
+    let below = 0;
+    for (let k = j + 1; k <= Math.min(h - 1, j + reach); k++) below = Math.max(below, rows[k]);
+    if (below < rows[j] * 1.25) continue;
+    // the bottom of the pinch, not its first row — a neck is several rows
+    // deep and the narrowest of them is the join
+    let best = j;
+    for (let k = j; k <= Math.min(bottom - 1, j + Math.max(2, Math.round(h * 0.06))); k++) {
+      if (rows[k] && rows[k] < rows[best]) best = k;
+    }
+    return best;
+  }
+
+  // No pinch anywhere: either the shoulders are out of frame or the outline
+  // is a mess. A seventh of the way down is where a standing figure's neck
+  // is, and it is a better guess than the whole picture.
+  return Math.max(4, Math.round(h * 0.14));
+}
+
+/**
  * The head, cut out of a whole-body outline.
  *
  * Everything downstream — the scale, the centring, the volume — is driven by
@@ -264,9 +341,20 @@ function bounds(mask, w, h) {
  * is a matter of handing it a silhouette that SAYS it is a head. The mask is
  * untouched: the volume simply never reaches down as far as the shoulders.
  *
- * The neck is the narrowest row between a twentieth and a third of the way
- * down, which is the same pinch `fit.js` looks for in three dimensions. Above
- * it is head; below it is somebody's chest.
+ * The neck is a PINCH and it is found by looking for a pinch, not by looking
+ * a fixed distance down. That distinction is the whole of this function's
+ * history: written as "the narrowest row in the top third" it assumed a
+ * standing figure photographed head to foot, where the neck is about an
+ * eighth of the way down. Somebody who photographs their HEAD — which is what
+ * people actually do when they want a face — hands it a picture whose neck is
+ * halfway down, and the search never reaches it. The band came back as a slice
+ * of scalp and the head-only carve was nonsense.
+ *
+ * So: walk down, and take the first row that is much narrower than the widest
+ * thing above it and widens again below. In a full-length photograph that
+ * lands at an eighth; in a head-and-shoulders one it lands at a half; and it
+ * cannot run on to the waist or the gap between the ankles, which are pinches
+ * too, because the neck is the first one.
  *
  * Worth doing because a head is nearly CONVEX, and a visual hull is exact for
  * convex things. A body is not: arms and legs stand off it, and the hull can
@@ -276,20 +364,8 @@ function bounds(mask, w, h) {
  */
 export function headOf(sil) {
   if (!sil || sil.h < 12) return sil;
-  const rows = new Int32Array(sil.h);
-  for (let j = 0; j < sil.h; j++) {
-    const y = sil.y + j;
-    if (y < 0 || y >= sil.mh) continue;
-    let n = 0;
-    for (let x = Math.max(0, sil.x); x < Math.min(sil.mw, sil.x + sil.w); x++) {
-      if (sil.mask[y * sil.mw + x]) n++;
-    }
-    rows[j] = n;
-  }
-  let neck = Math.round(sil.h * 0.17), narrow = Infinity;
-  for (let j = Math.round(sil.h * 0.05); j < Math.round(sil.h * 0.32); j++) {
-    if (rows[j] && rows[j] < narrow) { narrow = rows[j]; neck = j; }
-  }
+  const rows = rowWidths(sil);
+  const neck = neckRow(rows, sil.h);
   const h = Math.max(6, neck + 1);
   let x0 = sil.mw, x1 = -1, n = 0, sum = 0, count = 0;
   const crown = Math.round(h * 0.35);
