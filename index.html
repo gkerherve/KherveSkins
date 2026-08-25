@@ -160,6 +160,38 @@
     background: rgba(255,209,102,.06); color: var(--ink-dim); font-size: 12px; border-radius: 0 6px 6px 0;
   }
 
+  /* ---- the wardrobe ---------------------------------------------------- */
+  #cats button {
+    display: flex; width: 100%; justify-content: space-between; align-items: center;
+    padding: 13px 14px; margin: 0; border-radius: 0; border: 0;
+    border-bottom: 1px solid var(--line); background: none; font-size: 14px;
+    color: var(--white); letter-spacing: .01em;
+  }
+  #cats button:first-child { border-top: 1px solid var(--line); }
+  #cats button:hover { background: var(--panel2); }
+  #cats button span { color: var(--ink-dim); font-size: 12px; }
+  .rackbar { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+  .rackbar b { flex: 1; color: var(--white); font-size: 14px; }
+  #grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(74px, 1fr)); gap: 7px; }
+  .wear {
+    background: #10182a; border: 1px solid var(--line); border-radius: 8px;
+    padding: 4px 4px 5px; cursor: pointer; text-align: center;
+  }
+  .wear.on { border-color: var(--blue-lit); background: #1d2c4c; }
+  .wear canvas, .wear img { width: 100%; display: block; image-rendering: pixelated; }
+  .wear b { display: block; font-size: 10.5px; font-weight: 500; color: var(--ink-dim);
+    margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .wear.on b { color: var(--white); }
+
+  /* ---- moving about the flat image ------------------------------------- */
+  .navbar { display: flex; gap: 6px; margin: 8px 0; align-items: stretch; }
+  .navbar button { flex: none; width: 40px; font-size: 16px; padding: 6px 0; }
+  .navbar button#fitBtn2 { width: auto; padding: 6px 12px; font-size: 13px; }
+  .navbar select {
+    flex: 1; min-width: 0; padding: 7px 8px; border-radius: 8px; background: var(--panel2);
+    color: var(--ink); border: 1px solid var(--line); font: inherit; font-size: 12.5px;
+  }
+
   /* ---- a phone --------------------------------------------------------- */
   @media (max-width: 860px) {
     main { flex-direction: column; }
@@ -203,7 +235,7 @@
     <div id="tabs">
       <button data-tab="photo" class="on">Photo</button>
       <button data-tab="face">Face</button>
-      <button data-tab="look">Look</button>
+      <button data-tab="wear">Wear</button>
       <button data-tab="paint">Paint</button>
       <button data-tab="save">Save</button>
     </div>
@@ -283,37 +315,74 @@
       </section>
 
       <!-- ============================ LOOK ============================= -->
-      <section class="panel" data-panel="look">
-        <h2>How many pixels</h2>
-        <div class="seg" id="sizes"></div>
-        <div class="hint" id="sizeNote"></div>
+      <!-- ============================ WEAR ============================= -->
+      <section class="panel" data-panel="wear">
+        <div id="cats"></div>
 
-        <h2>Colours</h2>
-        <div class="hint">Taken off the photograph where it could be. Tick one to choose
-          it yourself — for a head-and-shoulders shot, the trousers and the shoes were
-          never in the picture and have been invented.</div>
-        <div id="swatches"></div>
+        <div id="rack" hidden>
+          <div class="rackbar">
+            <button id="backCats" class="small">‹ All</button>
+            <b id="rackName"></b>
+            <input type="color" id="rackColour" value="#888888" title="colour">
+          </div>
+          <div id="grid"></div>
+        </div>
 
-        <h2>Cloth</h2>
-        <div class="row"><label for="sleeve">sleeve length</label>
-          <input type="range" id="sleeve" min="0" max="12" step="1" value="8"><output id="sleeveOut">8</output></div>
-        <div class="row"><label for="boot">boot height</label>
-          <input type="range" id="boot" min="0" max="12" step="1" value="3"><output id="bootOut">3</output></div>
+        <div id="style" hidden>
+          <h2>How many pixels</h2>
+          <div class="seg" id="sizes"></div>
+          <div class="hint" id="sizeNote"></div>
 
-        <h2>The look of it</h2>
-        <div class="row"><label for="shading">shading</label>
-          <input type="range" id="shading" min="0" max="1.4" step="0.02" value="0.55"><output id="shadingOut">0.55</output></div>
-        <div class="row"><label for="grain">grain</label>
-          <input type="range" id="grain" min="0" max="1.2" step="0.02" value="0.3"><output id="grainOut">0.3</output></div>
-        <label class="check"><input type="checkbox" id="hairLayer"> hair on its own layer, standing proud of the skull</label>
-        <label class="check"><input type="checkbox" id="ears" checked> ears</label>
-        <div class="btns"><button id="reseedBtn">Different grain</button></div>
+          <h2>Build</h2>
+          <div class="seg" id="buildSeg">
+            <button data-slim="0">Classic arms</button>
+            <button data-slim="1">Slim arms</button>
+          </div>
+
+          <h2>Colours</h2>
+          <div class="hint">Taken off the photograph where it could be. Tick one to
+            choose it yourself — for a head-and-shoulders shot, the trousers and the
+            shoes were never in the picture and have been invented.</div>
+          <div id="swatches"></div>
+
+          <h2>From the photograph</h2>
+          <label class="check"><input type="checkbox" id="photoBody" checked>
+            take the clothes off the photograph, not off a swatch</label>
+          <div class="hint">With this on, the shirt in the picture — its print, its
+            stripes, the way the light falls off the shoulder — is sampled onto the
+            body, the arms and the legs, exactly as the face is. Whatever fell outside
+            the photograph keeps the plain version underneath.</div>
+
+          <h2>Cloth</h2>
+          <div class="row"><label for="sleeve">sleeve length</label>
+            <input type="range" id="sleeve" min="0" max="12" step="1" value="8"><output id="sleeveOut">8</output></div>
+          <div class="row"><label for="boot">boot height</label>
+            <input type="range" id="boot" min="0" max="12" step="1" value="3"><output id="bootOut">3</output></div>
+
+          <h2>The look of it</h2>
+          <div class="row"><label for="shading">shading</label>
+            <input type="range" id="shading" min="0" max="1.4" step="0.02" value="0.55"><output id="shadingOut">0.55</output></div>
+          <div class="row"><label for="grain">grain</label>
+            <input type="range" id="grain" min="0" max="1.2" step="0.02" value="0.3"><output id="grainOut">0.3</output></div>
+          <label class="check"><input type="checkbox" id="hairLayer"> hair on its own layer, standing proud of the skull</label>
+          <label class="check"><input type="checkbox" id="ears" checked> ears</label>
+          <div class="btns"><button id="reseedBtn">Different grain</button></div>
+        </div>
       </section>
 
       <!-- ============================ PAINT ============================ -->
       <section class="panel" data-panel="paint">
         <canvas id="board" class="board" width="700" height="700"></canvas>
         <div id="hoverSay" class="hint" style="min-height:1.4em"></div>
+
+        <div class="navbar">
+          <button id="zoomOut" title="zoom out">−</button>
+          <button id="zoomIn" title="zoom in">+</button>
+          <button id="fitBtn2" title="fit the whole skin">Fit</button>
+          <select id="goPart" title="jump to a part of the body"></select>
+        </div>
+        <div class="hint" id="navHint">Drag with two fingers, the middle button or the
+          right button to move about — or turn on <b>Move</b>. Wheel or pinch to zoom.</div>
 
         <div id="tools">
           <button data-tool="brush" class="on">Brush</button>
@@ -322,6 +391,7 @@
           <button data-tool="fill">Fill</button>
           <button data-tool="light">Lighten</button>
           <button data-tool="dark">Darken</button>
+          <button data-tool="pan">Move</button>
         </div>
         <div class="row">
           <input type="color" id="brushColour" value="#c23a2e">
@@ -338,7 +408,6 @@
         <div class="btns">
           <button id="undoBtn">Undo</button>
           <button id="redoBtn">Redo</button>
-          <button id="fitBtn">Fit</button>
         </div>
         <div class="btns">
           <button id="clearPartBtn" class="small">Clear a part…</button>

@@ -140,6 +140,49 @@ rather than reasoned about:
   one edge of a limb, invisible until you photograph the model against a
   colour that is not the page.
 
+## The wardrobe
+
+`js/wardrobe.js` is a hundred and twenty-five items across nine categories,
+and **not one of them is stored**. Every item is a function that paints in
+FRACTIONS of the part it is on, so the same wardrobe fits a 64 and a 256
+without a second set of numbers, and takes whatever colour it is handed.
+
+The thing that makes it cheap is that Minecraft's two layers ARE a wardrobe's
+layers: the base is the person and what is against their skin (hair, shirt,
+trousers, a beard), the outer is what goes over it (a jacket, a hat, glasses,
+a pack). So a hat covers hair by being on the head's overlay, and taking it
+off reveals the hair rather than a hole. Nothing needed a third layer, which
+is just as well.
+
+Two rules that are easy to get wrong:
+
+- **Order is the order a person dresses in.** `CATEGORIES` is that order —
+  tops before outerwear, hair before hats, face last. Anything drawing on the
+  outer layer draws after everything on the skin under it.
+- **A chosen haircut must REPLACE the built-in one.** `bareHead` paints the
+  photograph's hair out first. Without it "Shaved" is not shaved and every
+  style in the grid looks identical, because underneath it is.
+
+`js/doll.js` draws the thumbnails, and the head is drawn as a BOX rather than
+a square on purpose: a bob and a crew cut have the same front face, and a cap
+and a beanie have the same band — what separates them is the sides and the
+top. Drawn flat, half the wardrobe is twenty identical brown rectangles,
+which is exactly what the first version of that grid looked like.
+
+## The body, not just the head
+
+`photoClothes` samples the torso, the arms and the legs out of the photograph
+the same way the face is sampled, and lays them OVER the plain clothes drawn
+first. Over, not instead of: `sampleRect` reports how much of each rectangle
+was actually inside the picture, and anything under four fifths is left alone
+— so a head-and-shoulders shot gets a real shirt and invented trousers rather
+than a shirt and a grey smear off the bottom edge.
+
+The frame for it is `bodyFrame`, in head-heights, because a head is the only
+ruler available. It is a guess, and it is wrong for a child and for a
+photograph taken from below, which is why it wants to become a box on screen
+like the head's.
+
 ## Painting must outlive the generator
 
 Every slider re-runs `generate()` over the whole 64×64. A face somebody spent
@@ -166,6 +209,8 @@ asking anybody to look:
 | `__fit()` | re-size the canvases — a headless browser fires no animation frames, so the ResizeObserver never runs and the canvas stays 1px wide |
 | `__texel(x, y)` | read the image |
 | `__size(n)` | change the resolution, or ask what it is |
+| `__wear(cat, id)` | put something on, or ask what is on |
+| `__openCat(key)` | open one rack of the wardrobe, or go back to the list |
 | `__paint(x, y, hex)` | lay one texel exactly as a click would |
 | `capture(name)` | POST the render to `shots/NAME.png` |
 | `captureSkin(name)` | POST the 64×64 itself |

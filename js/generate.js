@@ -30,7 +30,8 @@
 
 import { parts, BASE, scaleOf } from './layout.js';
 import { clamp, clamp255, mix, shade, luma, dist, rng, hexToRgb } from './pixels.js';
-import { sampleFace, probe } from './photo.js';
+import { sampleFace, sampleRect, probe, bodyFrame } from './photo.js';
+import { dressUp } from './wardrobe.js';
 
 export const DEFAULTS = {
   slim: false,
@@ -54,6 +55,8 @@ export const DEFAULTS = {
   grain: 0.30,
   hairLayer: false,
   ears: true,
+  photoBody: true,     // take the clothes off the photograph, not off a swatch
+  wear: {},            // the wardrobe: one chosen item per category
   // the clothes
   sleeve: 8,
   boot: 3,
@@ -313,6 +316,111 @@ function emphasize(grid, cols, rows, o, pal, s) {
 }
 
 /**
+ * The rest of him, off the photograph.
+ *
+ * Reading a shirt as one flat colour throws away everything that made it
+ * that person's shirt — the print on it, the stripes, the way the light
+ * falls off the shoulder. This samples the torso, the arms and the legs the
+ * same way the face is sampled, and lays them over the plain clothes that
+ * were drawn first.
+ *
+ * OVER, not instead of. Whatever falls outside the photograph keeps the
+ * plain version underneath, so a head-and-shoulders shot gets a real shirt
+ * and invented trousers rather than a shirt and a grey smear. `covered` is
+ * how much of each rectangle was actually in the picture, and anything under
+ * four fifths is left alone.
+ */
+function photoClothes(skin, photo, f, o, P, pal, ink, s) {
+  const b = f.body || bodyFrame(f);
+  const armW = b.w * 0.30;
+  const legH = f.h * 2.30;
+
+  const lay = (rect, grid, cols, rows, face, k = 1) => {
+    skin.mapRect(rect, (u, v, cur, w, h) => {
+      const gu = Math.min(cols - 1, Math.floor(u * cols / w));
+      const gv = Math.min(rows - 1, Math.floor(v * rows / h));
+      return ink.grain(ink.lit(shade(grid[gv * cols + gu], k), face), 0.35);
+    });
+  };
+
+  const take = (x, y, w, h, cols, rows) => {
+    const g = sampleRect(photo, x, y, w, h, cols, rows);
+    if (g.covered < 0.80) return null;
+    const toned = g.map((c) => tone(c, o));
+    return crisp(toned, cols, rows, o.detail * 0.7);
+  };
+
+  // --- the torso ---------------------------------------------------------
+  const bodyR = P.body.rects;
+  const bw = bodyR.front[2], bh = bodyR.front[3];
+  const torso = take(b.x, b.y, b.w, b.h, bw, bh);
+  if (torso) {
+    lay(bodyR.front, torso, bw, bh, 'front');
+    // the back is the front, mirrored and a shade darker: nobody photographs
+    // both, and a plain panel back there is worse than a plausible one
+    skin.mapRect(bodyR.back, (u, v, cur, w, h) => {
+      const gu = Math.min(bw - 1, Math.floor((w - 1 - u) * bw / w));
+      const gv = Math.min(bh - 1, Math.floor(v * bh / h));
+      return ink.grain(ink.lit(shade(torso[gv * bw + gu], 0.94), 'back'), 0.35);
+    });
+    for (const [face, edge] of [['right', 0], ['left', bw - 1]]) {
+      skin.mapRect(bodyR[face], (u, v, cur, w, h) => {
+        const gv = Math.min(bh - 1, Math.floor(v * bh / h));
+        return ink.grain(ink.lit(torso[gv * bw + edge], face), 0.35);
+      });
+    }
+    const topRow = torso.slice(0, bw);
+    const mean = topRow.reduce((a, c) => [a[0] + c[0] / bw, a[1] + c[1] / bw, a[2] + c[2] / bw], [0, 0, 0]);
+    skin.mapRect(bodyR.top, (u, v, cur, w, h) => (
+      u >= w * 0.25 && u < w * 0.75 && v >= h * 0.25 && v < h * 0.75
+        ? ink.lit(shade(pal.skin, 0.88), 'top')
+        : ink.lit(shade(mean, 1.04), 'top')));
+  }
+
+  // --- the arms ----------------------------------------------------------
+  for (const [key, dir] of [['armR', -1], ['armL', +1]]) {
+    const R = P[key].rects;
+    const aw = R.front[2], ah = R.front[3];
+    const x = dir < 0 ? b.x - armW : b.x + b.w;
+    const arm = take(x, b.y, armW, b.h, aw, ah);
+    if (!arm) continue;
+    for (const face of ['front', 'back', 'right', 'left']) {
+      const k = face === 'back' ? 0.94 : 1;
+      const mirror = face === 'back';
+      skin.mapRect(R[face], (u, v, cur, w, h) => {
+        const gu = Math.min(aw - 1, Math.floor((mirror ? w - 1 - u : u) * aw / w));
+        const gv = Math.min(ah - 1, Math.floor(v * ah / h));
+        return ink.grain(ink.lit(shade(arm[gv * aw + gu], k), face), 0.35);
+      });
+    }
+    skin.mapRect(R.top, () => ink.lit(shade(arm[0], 1.04), 'top'));
+    skin.mapRect(R.bottom, () => ink.lit(shade(arm[(ah - 1) * aw], 0.9), 'bottom'));
+  }
+
+  // --- the legs ----------------------------------------------------------
+  const hip = b.y + b.h;
+  for (const [key, dir] of [['legR', -1], ['legL', +1]]) {
+    const R = P[key].rects;
+    const lw = R.front[2], lh = R.front[3];
+    const legW = b.w * 0.48;
+    const x = b.x + b.w / 2 + dir * (b.w * 0.02) - (dir < 0 ? legW : 0);
+    const leg = take(x, hip, legW, legH, lw, lh);
+    if (!leg) continue;
+    for (const face of ['front', 'back', 'right', 'left']) {
+      const k = face === 'back' ? 0.94 : 1;
+      const mirror = face === 'back';
+      skin.mapRect(R[face], (u, v, cur, w, h) => {
+        const gu = Math.min(lw - 1, Math.floor((mirror ? w - 1 - u : u) * lw / w));
+        const gv = Math.min(lh - 1, Math.floor(v * lh / h));
+        return ink.grain(ink.lit(shade(leg[gv * lw + gu], k), face), 0.35);
+      });
+    }
+    skin.mapRect(R.top, () => ink.lit(shade(leg[0], 1.02), 'top'));
+    skin.mapRect(R.bottom, () => ink.lit(shade(leg[(lh - 1) * lw], 0.7), 'bottom'));
+  }
+}
+
+/**
  * Build the whole man.
  *
  * @param {Skin}  skin   the image written into
@@ -443,7 +551,16 @@ export function generate(skin, photo, f, opts) {
   // Optional, and off by default for a reason: it looks better when the hair
   // was read correctly and looks like a bald man wearing a doily when it was
   // not. What it buys is depth — hair that stands a pixel proud of the skull.
-  if (o.hairLayer) {
+  const wornHair = o.wear && o.wear.hair && o.wear.hair !== 'auto';
+  if (wornHair) {
+    // A haircut chosen from the wardrobe replaces the one in the photograph,
+    // and "Shaved" has to mean shaved: without this the built-in hair stays
+    // underneath and every style in the grid looks the same, because it is.
+    bareHead(skin, head, hairMap, pal, lit, grain, N);
+    for (const face of ['top', 'bottom', 'right', 'front', 'left', 'back']) {
+      skin.fillRect(head.overRects[face], [0, 0, 0, 0]);
+    }
+  } else if (o.hairLayer) {
     liftHair(skin, head, hairMap, pal, lit, grain, N);
   } else {
     for (const face of ['top', 'bottom', 'right', 'front', 'left', 'back']) {
@@ -451,8 +568,30 @@ export function generate(skin, photo, f, opts) {
     }
   }
 
-  dress(skin, P, pal, o, { lit, grain }, s);
+  const ink = { lit, grain };
+  dress(skin, P, pal, o, ink, s);
+  if (o.photoBody) photoClothes(skin, photo, f, o, P, pal, ink, s);
+  dressUp(skin, o.wear, {
+    parts: P, pal, ink, s, size, colours: o.colours || {}, slim: o.slim,
+  });
   return pal;
+}
+
+/** Paint the hair out, leaving a scalp for the wardrobe to draw on. */
+function bareHead(skin, head, hairMap, pal, lit, grain, N) {
+  const scalp = mix(pal.skin, [0, 0, 0], 0.10);
+  for (const face of ['top', 'right', 'front', 'left', 'back']) {
+    const r = head.rects[face];
+    for (let v = 0; v < r[3]; v++) {
+      for (let u = 0; u < r[2]; u++) {
+        const c = skin.get(r[0] + u, r[1] + v);
+        const isHair = face === 'front'
+          ? hairMap[v * N + u] > 0.5
+          : dist(c, pal.hair) < dist(c, pal.skin);
+        if (isHair) skin.set(r[0] + u, r[1] + v, grain(lit(scalp, face), 0.4));
+      }
+    }
+  }
 }
 
 /** Move the hair off the skull and onto the hat layer, a pixel proud of it. */
@@ -612,9 +751,11 @@ export function blank(skin, opts = {}) {
   const cell = (v) => v / N * 8;
   for (const face of ['front', 'back', 'right', 'left', 'top', 'bottom']) {
     skin.mapRect(head.rects[face], (u, v) => {
-      if (face === 'top') return grain(lit(pal.hair, face), 0.6);
+      const bare = o.wear && o.wear.hair && o.wear.hair !== 'auto';
+      if (face === 'top') return grain(lit(bare ? shade(pal.skin, 0.92) : pal.hair, face), 0.6);
       if (face === 'bottom') return grain(lit(shade(pal.skin, 0.78), face), 0.4);
-      const hair = face === 'back' ? cell(v) < 6 : cell(v) < 3;
+      const worn = o.wear && o.wear.hair && o.wear.hair !== 'auto';
+      const hair = worn ? false : (face === 'back' ? cell(v) < 6 : cell(v) < 3);
       let c = hair ? pal.hair : pal.skin;
       if (face === 'front') {
         const cu = cell(u), cv = cell(v);
@@ -626,6 +767,10 @@ export function blank(skin, opts = {}) {
     });
     skin.fillRect(head.overRects[face], [0, 0, 0, 0]);
   }
-  dress(skin, P, pal, o, { lit, grain }, s);
+  const ink = { lit, grain };
+  dress(skin, P, pal, o, ink, s);
+  dressUp(skin, o.wear, {
+    parts: P, pal, ink, s, size, colours: o.colours || {}, slim: o.slim,
+  });
   return pal;
 }

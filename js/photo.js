@@ -746,6 +746,61 @@ export function sampleFace(photo, f, cols, rows, o = {}) {
 }
 
 /**
+ * A plain rectangle of the photograph, squeezed into a grid.
+ *
+ * No warp and no anchors: a shirt has no eye line. What it does have is an
+ * EDGE, and half the point of this is knowing how much of the rectangle was
+ * actually in the picture — a head-and-shoulders shot has no trousers in it,
+ * and a torso sampled off the bottom of the frame is a grey smear that
+ * somebody has to notice and undo.
+ */
+export function sampleRect(photo, x, y, w, h, cols, rows) {
+  const out = new Array(cols * rows);
+  const N = 3;
+  let inside = 0;
+  for (let v = 0; v < rows; v++) {
+    for (let u = 0; u < cols; u++) {
+      let r = 0, g = 0, b = 0, n = 0, seen = 0;
+      for (let j = 0; j < N; j++) {
+        for (let i = 0; i < N; i++) {
+          const px = x + w * (u + (i + 0.5) / N) / cols;
+          const py = y + h * (v + (j + 0.5) / N) / rows;
+          if (photo.inside(px, py)) seen++;
+          const c = photo.at(px, py);
+          r += c[0]; g += c[1]; b += c[2]; n++;
+        }
+      }
+      inside += seen / n;
+      out[v * cols + u] = [r / n, g / n, b / n, 255];
+    }
+  }
+  out.covered = inside / (cols * rows);
+  return out;
+}
+
+/**
+ * The rest of the person, in head-heights.
+ *
+ * A head is the ruler every life-drawing class uses, and it is the only
+ * ruler available here: once the head box is right, the shoulders are a
+ * third of a head below the chin and the hips are a bit over two heads below
+ * that, on anybody. Wrong for a child and wrong for a photograph taken from
+ * below — which is why it is a BOX ON SCREEN and not a constant.
+ */
+export function bodyFrame(f) {
+  const H = f.h, W = f.w;
+  const cx = f.x + W / 2;
+  const chin = f.y + H;
+  const torsoW = W * 1.30;
+  return {
+    x: cx - torsoW / 2,
+    y: chin + H * 0.30,
+    w: torsoW,
+    h: H * 1.95,
+  };
+}
+
+/**
  * The colours a photograph offers, before anybody has drawn anything.
  *
  * Hair, skin, shirt, trousers, shoes and the background — the last one so

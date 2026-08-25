@@ -68,16 +68,29 @@ of the photograph — brightness, contrast, colour, warmth, sharpness. Also
 of what was sampled. Every colour it uses was found in your photograph; what
 the slider changes is how much it commits to them.
 
-**Look.** How many pixels, and the five colours — hair, complexion, shirt, trousers, shoes — each
-one labelled with where it came from. *Read off the photograph* means it was
-measured. *Invented* means it was not in the picture at all, which is what
-happens to trousers in a head-and-shoulders shot. Click one to choose it
-yourself. Sleeve length, boot height, shading, grain, and hair as a layer of
-its own standing proud of the skull.
+**Wear.** The wardrobe, laid out the way Minecraft's own is: a list of
+categories — Hair, Tops, Bottoms, Outerwear, Headwear, Gloves, Footwear, Face
+Items, Back Items — and a grid of things inside each one, each drawn on a
+little figure in *your* colours so choosing between two of them is a fair
+comparison. A hundred and twenty-five items, every one generated rather than
+stored, so they fit any resolution and any palette.
 
-**Paint.** The flat 64×64, every face outlined so you can tell an ear from a
-hem. Brush, eraser, eyedropper, fill, lighten, darken; both layers or one;
-undo and redo. **Mirror** paints the other side of the body at the same time
+Each category has a colour of its own, and the three the photograph can
+actually answer — hair, top, bottom, footwear — start on **From the photo**,
+which means "leave what the picture gave you".
+
+**Style**, the first entry, is the rest of it: how many pixels, classic or
+slim arms, the five colours the photograph gave (each labelled *read off the
+photograph*, *yours*, or *invented*), whether to take the clothes off the
+photograph at all, and the shading and grain.
+
+**Paint.** The flat image, every face outlined so you can tell an ear from a
+hem. Brush, eraser, eyedropper, fill, lighten, darken, and **Move**; both
+layers or one; undo and redo. Getting about: two fingers, the middle button,
+the right button or the Move tool all drag the picture; the wheel and pinch
+zoom, and so do the **+ / − / Fit** buttons. The one that actually gets used
+is **Jump to…** — pick *left leg — back* off the list rather than hunting for
+it. **Mirror** paints the other side of the body at the same time
 — the left arm lives twenty-eight rows away from the right one and faces the
 other way, and doing that by hand is what makes people give up. You can also
 turn on **paint on him** above the figure and click the model directly.

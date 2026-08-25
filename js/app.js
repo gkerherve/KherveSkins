@@ -22,14 +22,16 @@ import { buildFigure, skinTexture, pose, orbit, pickTexel, scene as makeScene } 
 import { Cropper } from './cropper.js';
 import { Painter } from './paint.js';
 import * as store from './store.js';
-import { parts, SIZES, BASE } from './layout.js';
+import { parts, regions, SIZES, BASE } from './layout.js';
+import { CATEGORIES, DEFAULT_WEAR, EXTRA_COLOURS } from './wardrobe.js';
+import { drawDoll, CROPS } from './doll.js';
 
 const $ = (id) => document.getElementById(id);
 
 const S = {
   photo: null,
   frame: null,
-  opts: { ...DEFAULTS, colours: {} },
+  opts: { ...DEFAULTS, colours: {}, wear: { ...DEFAULT_WEAR } },
   skin: new Skin(BASE),
   base: null,          // an imported skin, when there is no photograph
   edits: new Map(),    // every texel laid by hand: "x,y" -> [r,g,b,a]
@@ -286,6 +288,7 @@ function setSize(n) {
   rebuild();
   painter.fit();
   drawSizes();
+  fillParts();
   keepPrefs();
 }
 
@@ -307,15 +310,17 @@ function drawSizes() {
   if (dl64) dl64.style.display = S.skin.size === BASE ? 'none' : '';
 }
 
-$('slimBtn').onclick = () => {
-  S.opts.slim = !S.opts.slim;
+function setSlim(slim) {
+  S.opts.slim = !!slim;
   $('slimBtn').textContent = S.opts.slim ? 'slim arms' : 'classic arms';
   $('slimBtn').classList.toggle('on', S.opts.slim);
   painter.slim = S.opts.slim;
   rebuildFigure();
   rebuild();
+  fillParts();
   keepPrefs();
-};
+}
+$('slimBtn').onclick = () => setSlim(!S.opts.slim);
 
 $('poseBtn').onclick = () => {
   S.poseMode = S.poseMode === 'walk' ? 'idle' : S.poseMode === 'idle' ? 'still' : 'walk';
@@ -376,6 +381,170 @@ function drawSwatches() {
 }
 
 // ---------------------------------------------------------------------------
+// the wardrobe
+// ---------------------------------------------------------------------------
+//
+// Two screens, like Minecraft's own: a list of categories, and a grid of
+// things inside one of them. The grid's pictures are built HERE rather than
+// stored, because every item is a function and a hundred stored PNGs would be
+// a hundred things to keep in step with the code that draws them.
+
+const thumbCache = new Map();
+
+/** What the thumbnails should be built against: the wearer, not a mannequin. */
+function thumbKey() {
+  const c = S.opts.colours || {};
+  return [S.opts.slim, rgbOf('skin'), rgbOf('hair'), rgbOf('shirt'), rgbOf('trousers'),
+    rgbOf('shoes'), c.outer, c.headwear, c.gloves, c.face, c.back].join('|');
+}
+
+function rgbOf(key) {
+  const chosen = (S.opts.colours || {})[key];
+  if (chosen) return chosen;
+  return S.pal && S.pal[key] ? rgbToHex(S.pal[key]) : '';
+}
+
+/**
+ * One item's picture.
+ *
+ * Built on a 64 whatever the working size is — it is forty pixels on screen
+ * and nobody is counting texels in it — and against the palette in use, so
+ * the hair in the grid is YOUR hair colour and choosing between two of them
+ * is a fair comparison.
+ */
+function thumbFor(cat, it) {
+  const key = `${thumbKey()}|${cat.key}|${it.id}`;
+  const had = thumbCache.get(key);
+  if (had) return had;
+  const s = new Skin(BASE);
+  const wear = { ...S.opts.wear, [cat.key]: it.id };
+  // the neighbouring categories are cleared, or a hat sits on every haircut
+  if (cat.key === 'hair') { wear.headwear = 'none'; wear.face = 'none'; }
+  if (cat.key === 'top') { wear.outer = 'none'; wear.back = 'none'; }
+  if (cat.key === 'bottom') wear.footwear = 'none';
+  blank(s, {
+    ...S.opts, size: BASE, wear, grain: 0.12,
+    colours: {
+      ...S.opts.colours,
+      hair: rgbOf('hair') || '#40342a',
+      skin: rgbOf('skin') || '#e0ac7e',
+      shirt: rgbOf('shirt') || '#3b6ea5',
+      trousers: rgbOf('trousers') || '#33405e',
+      shoes: rgbOf('shoes') || '#2b2521',
+    },
+  });
+  const c = document.createElement('canvas');
+  c.width = 128; c.height = 128;
+  drawDoll(c.getContext('2d'), s, S.opts.slim, CROPS[cat.shows] || CROPS.all, cat.key === 'back');
+  const url = c.toDataURL('image/png');
+  thumbCache.set(key, url);
+  return url;
+}
+
+function drawCats() {
+  const host = $('cats');
+  host.textContent = '';
+  const row = (name, note, onclick) => {
+    const b = document.createElement('button');
+    const t = document.createElement('i');
+    t.style.fontStyle = 'normal';
+    t.textContent = name;
+    const n = document.createElement('span');
+    n.textContent = note;
+    b.append(t, n);
+    b.onclick = onclick;
+    host.appendChild(b);
+  };
+  row('Style', `${S.skin.size}px · ${S.opts.slim ? 'slim' : 'classic'}`, () => openStyle());
+  for (const cat of CATEGORIES) {
+    const id = (S.opts.wear || {})[cat.key];
+    const it = cat.items.find((x) => x.id === id);
+    const note = !id || id === 'auto' ? 'from the photo' : (it ? it.name : 'none');
+    row(cat.name, note, () => openRack(cat.key));
+  }
+}
+
+let openCat = null;
+
+function openStyle() {
+  openCat = null;
+  $('cats').hidden = true;
+  $('rack').hidden = true;
+  $('style').hidden = false;
+  drawSizes();
+  drawSwatches();
+  for (const b of document.querySelectorAll('#buildSeg button')) {
+    b.classList.toggle('on', (b.dataset.slim === '1') === !!S.opts.slim);
+  }
+}
+
+function openRack(key) {
+  const cat = CATEGORIES.find((c) => c.key === key);
+  if (!cat) return;
+  openCat = cat;
+  $('cats').hidden = true;
+  $('style').hidden = true;
+  $('rack').hidden = false;
+  $('rackName').textContent = cat.name;
+  const colour = $('rackColour');
+  colour.value = rgbOf(cat.colour) || EXTRA_COLOURS[cat.colour] || '#888888';
+  colour.oninput = () => {
+    S.opts.colours[cat.colour] = colour.value;
+    rebuild();
+    drawGrid();
+    keepPrefs();
+  };
+  drawGrid();
+}
+
+function closeRack() {
+  openCat = null;
+  $('rack').hidden = true;
+  $('style').hidden = true;
+  $('cats').hidden = false;
+  drawCats();
+}
+
+function drawGrid() {
+  const cat = openCat;
+  const host = $('grid');
+  host.textContent = '';
+  if (!cat) return;
+  const chosen = (S.opts.wear || {})[cat.key];
+  const list = [...cat.items];
+  // "from the photo" only means anything where the photograph had an answer
+  if (['top', 'bottom', 'footwear', 'hair'].includes(cat.key)) {
+    list.unshift({ id: 'auto', name: 'From the photo' });
+  }
+  for (const it of list) {
+    const cell = document.createElement('div');
+    cell.className = `wear${it.id === chosen ? ' on' : ''}`;
+    const img = document.createElement('img');
+    img.alt = it.name;
+    img.src = it.id === 'auto' ? thumbFor(cat, { id: 'auto', draw: null }) : thumbFor(cat, it);
+    const b = document.createElement('b');
+    b.textContent = it.name;
+    cell.append(img, b);
+    cell.onclick = () => {
+      S.opts.wear = { ...S.opts.wear, [cat.key]: it.id };
+      rebuild();
+      drawGrid();
+      keepPrefs();
+    };
+    host.appendChild(cell);
+  }
+}
+
+$('backCats').onclick = closeRack;
+for (const b of document.querySelectorAll('#buildSeg button')) {
+  b.onclick = () => {
+    setSlim(b.dataset.slim === '1');
+    for (const o of document.querySelectorAll('#buildSeg button')) o.classList.toggle('on', o === b);
+  };
+}
+$('photoBody').onchange = (e) => { S.opts.photoBody = e.target.checked; rebuild(); keepPrefs(); };
+
+// ---------------------------------------------------------------------------
 // the painter
 // ---------------------------------------------------------------------------
 
@@ -392,6 +561,9 @@ const painter = new Painter(board, S.skin, {
 for (const b of document.querySelectorAll('#tools button')) {
   b.onclick = () => {
     painter.tool = b.dataset.tool;
+    $('navHint').textContent = b.dataset.tool === 'pan'
+      ? 'Drag to move the picture about. Pick another tool to paint again.'
+      : 'Drag with two fingers, the middle button or the right button to move about — or turn on Move. Wheel or pinch to zoom.';
     for (const o of document.querySelectorAll('#tools button')) o.classList.toggle('on', o === b);
   };
 }
@@ -408,9 +580,54 @@ $('brushSize').oninput = (e) => {
   $('brushSizeOut').textContent = e.target.value;
 };
 $('mirror').onchange = (e) => { painter.mirror = e.target.checked; painter.redraw(); };
+
+/**
+ * Getting about the flat image.
+ *
+ * The old version had one way in and out: pinch, on a picture where a single
+ * finger paints. On a phone that is a fight, and with a mouse there was no
+ * pan at all. Now there are four ways to move — two fingers, the middle
+ * button, the right button, and a Move tool for anybody who would rather not
+ * remember any of that — and a list of every part of the body to jump to,
+ * which is the one that actually gets used: nobody hunts for the left
+ * calf's back, they choose it.
+ */
+$('zoomIn').onclick = () => painter.zoomBy(1.35);
+$('zoomOut').onclick = () => painter.zoomBy(1 / 1.35);
+$('fitBtn2').onclick = () => painter.fit();
+
+function fillParts() {
+  const sel = $('goPart');
+  const at = sel.value;
+  sel.textContent = '';
+  const none = document.createElement('option');
+  none.value = '';
+  none.textContent = 'Jump to…';
+  sel.appendChild(none);
+  const seen = new Set();
+  for (const r of regions(S.opts.slim, S.skin.size)) {
+    if (r.layer !== 'base') continue;
+    const key = `${r.part}:${r.face}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const o = document.createElement('option');
+    o.value = key;
+    o.textContent = `${r.name} — ${r.face}`;
+    sel.appendChild(o);
+  }
+  if (at) sel.value = at;
+}
+
+$('goPart').onchange = (e) => {
+  const [part, face] = e.target.value.split(':');
+  if (!part) return;
+  const r = regions(S.opts.slim, S.skin.size)
+    .find((q) => q.part === part && q.face === face && q.layer === 'base');
+  if (r) painter.focus(r.rect);
+};
 $('undoBtn').onclick = () => { painter.undo(); refresh(); };
 $('redoBtn').onclick = () => { painter.redo(); refresh(); };
-$('fitBtn').onclick = () => painter.fit();
+
 $('revertBtn').onclick = () => {
   if (!S.edits.size) return;
   painter.begin();
@@ -480,6 +697,7 @@ function showTab(which) {
   for (const b of document.querySelectorAll('#tabs button')) b.classList.toggle('on', b.dataset.tab === which);
   for (const p of document.querySelectorAll('.panel')) p.classList.toggle('on', p.dataset.panel === which);
   if (which === 'paint') requestAnimationFrame(() => { sizeBoards(); painter.fit(); });
+  if (which === 'wear') { closeRack(); }
   if (which === 'photo') requestAnimationFrame(() => { sizeBoards(); cropper.fit(); cropper.draw(); });
 }
 for (const b of document.querySelectorAll('#tabs button')) b.onclick = () => showTab(b.dataset.tab);
@@ -577,7 +795,10 @@ $('keepBtn').onclick = () => {
 $('newBtn').onclick = () => {
   S.photo = null; S.frame = null; S.base = null;
   S.edits.clear();
-  S.opts = { ...DEFAULTS, colours: {}, slim: S.opts.slim, size: S.skin.size };
+  S.opts = {
+    ...DEFAULTS, colours: {}, slim: S.opts.slim, size: S.skin.size,
+    wear: { ...DEFAULT_WEAR },
+  };
   cropper.setPhoto(null);
   cropper.setFrame(null);
   $('dropNote').style.display = '';
@@ -663,12 +884,19 @@ function drawShelf() {
 // ---------------------------------------------------------------------------
 
 function keepPrefs() {
-  store.prefs({ opts: { ...S.opts, colours: { ...S.opts.colours } } });
+  store.prefs({ opts: { ...S.opts, colours: { ...S.opts.colours }, wear: { ...S.opts.wear } } });
 }
 
 function loadPrefs() {
   const p = store.prefs();
-  if (p && p.opts) S.opts = { ...DEFAULTS, ...p.opts, colours: { ...(p.opts.colours || {}) } };
+  if (p && p.opts) {
+    S.opts = {
+      ...DEFAULTS, ...p.opts,
+      colours: { ...(p.opts.colours || {}) },
+      wear: { ...DEFAULT_WEAR, ...(p.opts.wear || {}) },
+    };
+  }
+  $('photoBody').checked = S.opts.photoBody !== false;
   if (SIZES.includes(S.opts.size) && S.opts.size !== S.skin.size) {
     S.skin.resize(S.opts.size);
     painter.size = S.opts.size;
@@ -694,6 +922,8 @@ function loadPrefs() {
 loadPrefs();
 painter.slim = S.opts.slim;
 drawSizes();
+drawCats();
+fillParts();
 rebuildFigure();
 sizeBoards();
 cropper.draw();
@@ -720,6 +950,12 @@ Object.assign(window, {
   __setFrame: (f) => { S.frame = { ...S.frame, ...f }; cropper.setFrame(S.frame); rebuild(); },
   __texel: (x, y) => S.skin.get(x, y),
   __size: (n) => (n ? (setSize(n), S.skin.size) : S.skin.size),
+  __wear: (cat, id) => {
+    if (cat) { S.opts.wear = { ...S.opts.wear, [cat]: id }; rebuild(); }
+    return { ...S.opts.wear };
+  },
+  __cats: () => CATEGORIES.map((c) => ({ key: c.key, n: c.items.length })),
+  __openCat: (k) => (k ? openRack(k) : closeRack()),
   __png: () => S.skin.toDataURL(),
   __view: view,
   __fig: () => fig,

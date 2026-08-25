@@ -65,6 +65,7 @@ export class Painter {
     this.setExtra = opts.setExtra || (() => {});
     this.hover = null;
     this.painting = false;
+    this.dragging = false;
     this.pointers = new Map();
     this.pinch = 0;
     this.wire(canvas);
@@ -81,10 +82,15 @@ export class Painter {
     };
     canvas.addEventListener('pointerdown', (e) => {
       canvas.setPointerCapture(e.pointerId);
-      this.pointers.set(e.pointerId, pos(e));
-      if (this.pointers.size === 1 && e.button !== 1) {
+      const at = pos(e);
+      this.pointers.set(e.pointerId, at);
+      // Middle button, right button or the Move tool all mean the same thing:
+      // this drag moves the picture rather than marking it. Decided once, on
+      // the way down, so a stroke never turns into a pan half way through.
+      this.dragging = e.button === 1 || e.button === 2 || this.tool === 'pan';
+      if (this.pointers.size === 1 && !this.dragging) {
         this.begin();
-        this.stroke(pos(e), e);
+        this.stroke(at, e);
       }
       e.preventDefault();
     });
@@ -116,13 +122,19 @@ export class Painter {
         return;
       }
       this.hover = this.toTexel(p);
+      if (this.dragging && prev) {
+        this.pan.x += p.x - prev.x;
+        this.pan.y += p.y - prev.y;
+        this.redraw();
+        return;
+      }
       if (this.painting && prev) this.stroke(p, e);
       else this.redraw();
     });
     const up = (e) => {
       this.pointers.delete(e.pointerId);
       if (this.pointers.size < 2) { this.pinch = 0; this.lastMid = null; }
-      if (!this.pointers.size) this.painting = false;
+      if (!this.pointers.size) { this.painting = false; this.dragging = false; }
     };
     canvas.addEventListener('pointerup', up);
     canvas.addEventListener('pointercancel', up);
@@ -147,6 +159,36 @@ export class Painter {
     this.zoom = Math.max(0.5, Math.min(c.width, c.height) / (n + 2));
     this.pan.x = (c.width - n * this.zoom) / 2;
     this.pan.y = (c.height - n * this.zoom) / 2;
+    this.redraw();
+  }
+
+  /** Zoom about the middle of the view, for the + and − buttons. */
+  zoomBy(k) {
+    const c = this.canvas;
+    const mid = { x: c.width / 2, y: c.height / 2 };
+    const before = this.toTexel(mid);
+    this.zoom = Math.max(0.4, Math.min(48, this.zoom * k));
+    const after = this.toTexel(mid);
+    this.pan.x += (after.fx - before.fx) * this.zoom;
+    this.pan.y += (after.fy - before.fy) * this.zoom;
+    this.redraw();
+  }
+
+  /**
+   * Put one rectangle of the image in the middle of the view, big.
+   *
+   * The single most useful way to get about a skin: nobody hunts for the back
+   * of the left calf by dragging, they pick it off a list. A little margin
+   * round it so the neighbouring faces stay visible — an ear is easier to
+   * paint when you can see where the cheek stops.
+   */
+  focus(rect) {
+    const c = this.canvas;
+    const [x, y, w, h] = rect;
+    const pad = 1.9;
+    this.zoom = Math.max(0.4, Math.min(48, Math.min(c.width / (w * pad), c.height / (h * pad))));
+    this.pan.x = c.width / 2 - (x + w / 2) * this.zoom;
+    this.pan.y = c.height / 2 - (y + h / 2) * this.zoom;
     this.redraw();
   }
 
@@ -194,6 +236,7 @@ export class Painter {
   }
 
   stroke(p, e) {
+    if (this.tool === 'pan') return;
     const t = this.toTexel(p);
     if (this.tool === 'pick') {
       const c = this.skin.get(t.x, t.y);
