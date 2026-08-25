@@ -128,8 +128,19 @@ def shot(angle: int | None, path: str) -> None:
 def main() -> None:
     os.makedirs(OUT, exist_ok=True)
     shot(None, os.path.join(OUT, "turn-plate.png"))
-    for a in (0, 90, 180, 270):
+    # eight turns, not four: the diagonals are what round a shoulder off, and
+    # they are what the carve was short of
+    for a in (0, 45, 90, 135, 180, 225, 270, 315):
         shot(a, os.path.join(OUT, f"turn-{a}.png"))
+    # AND one deliberately spoiled set, because the interesting question is
+    # not "does it work when the shots are perfect" — it is what happens when
+    # one of them is not. This one has a turn taken from further back.
+    global TOP, FLOOR, BODY_H
+    keepT, keepF, keepB = TOP, FLOOR, BODY_H
+    TOP, FLOOR = 150, 600
+    BODY_H = FLOOR - TOP
+    shot(90, os.path.join(OUT, "turn-bad90.png"))
+    TOP, FLOOR, BODY_H = keepT, keepF, keepB
     print(f"figure: crown y={TOP} floor y={FLOOR} height={BODY_H}px")
     print("  head 0.00-0.22  neck 0.22-0.25  torso 0.25-0.62  legs 0.62-1.00")
 

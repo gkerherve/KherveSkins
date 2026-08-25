@@ -154,7 +154,23 @@ a dimple, and with four views the cross-sections are square, which is why a
 45-degree view of the result looks boxier than the front. More views would
 round it; nothing else will.
 
-Three things that cost time and would cost it again:
+**Normalise every view on the MEDIAN height, not on its own.** The camera did
+not move and the person did not grow, so they are the same height in every
+shot; any disagreement is an outline that caught a shadow or lost a foot. A
+view allowed to set its own scale has its whole projection stretched by a
+fifth, which slices the volume to ribbons — the symptom is a carve that comes
+out as a cloud of chips rather than a person. With the median, one bad turn
+out of eight costs a little accuracy and nothing else, which is measurable:
+the same set with one shot deliberately taken from further back carves to the
+same neck, hip and floor, to the cube.
+
+**Four turns is the minimum and eight is the point.** With four, every
+cross-section of the hull is a square, so shoulders come out with corners on
+them — visible the moment you turn it 45 degrees. Past seven views a cube is
+allowed to miss ONE and still be kept, because by then the outlines outnumber
+the mistakes.
+
+Three more things that cost time and would cost it again:
 
 - **`mw`/`mh` are the picture, `x/y/w/h` are the person in it.** Spreading
   the bounding box over the mask's own `w`/`h` made every projection read the
@@ -162,6 +178,11 @@ Three things that cost time and would cost it again:
 - **Line the views up on the HEAD, not on the outline's middle.** A person
   turning on the spot keeps their head over the axis; their silhouette centre
   moves, because a shoulder is wider than a chest.
+- **`tidy` is not cosmetic.** A stray pixel in one outline pokes a hole
+  through a chest and a stray pixel the other way leaves a cube hanging
+  beside an ear; both read as the carve having failed when it mostly worked.
+  Fill anything with company on five sides, drop anything with company on
+  fewer than two.
 - **An arm that does not touch the body is a separate blob**, and
   `keepLargest` will bin it. Real arms attach at the shoulder so this is fine
   in practice — but it is why the test generator draws a yoke, and it is the

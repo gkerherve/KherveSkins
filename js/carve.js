@@ -231,16 +231,32 @@ export class Volume {
  *                       facing the camera, going the way the person turned
  * @param {object} o     grid size
  */
+const median = (list) => {
+  const v = [...list].sort((a, b) => a - b);
+  return v.length % 2 ? v[(v.length - 1) / 2] : (v[v.length / 2 - 1] + v[v.length / 2]) / 2;
+};
+
 export function carve(views, o = {}) {
   const ny = o.ny || 72;
   const nx = o.nx || 40;
   const nz = o.nz || 40;
   const vol = new Volume(nx, ny, nz);
 
-  // Every view is normalised on the same two numbers — the top of the head
-  // and the height of the person — because those are the two a turn on the
-  // spot cannot change. Everything else about an outline changes with the
-  // angle, which is the point of taking four of them.
+  // ONE scale and ONE crown row for every view, and both are the MEDIAN of
+  // what the outlines said rather than each view's own.
+  //
+  // This is the fix for a carve that comes out as a cloud of chips. The
+  // camera did not move and the person did not grow, so they are the same
+  // height in every shot — any disagreement is an outline that caught a
+  // shadow or lost a foot. Let such a view set its own scale and its whole
+  // projection is stretched by a fifth, which slices the volume to ribbons;
+  // take the median and one bad outline costs a little accuracy instead of
+  // most of the person. Where the head sits ACROSS the frame stays per-view,
+  // because that one really can shift a little between shots.
+  const medH = median(views.map((v) => v.sil.h));
+  const medTop = median(views.map((v) => v.sil.y));
+  const scale = medH / ny;
+
   const cams = views.map((v) => {
     const a = (v.angle || 0) * Math.PI / 180;
     return {
@@ -248,34 +264,82 @@ export function carve(views, o = {}) {
       photo: v.photo,
       cos: Math.cos(a),
       sin: Math.sin(a),
-      scale: v.sil.h / ny,          // photograph pixels per cube
-      top: v.sil.y,
+      scale,
+      top: medTop,
       cx: v.sil.headX,
       dir: [Math.sin(a), 0, -Math.cos(a)],   // which way this camera looks from
     };
   });
+
+  // With enough angles a cube may miss ONE of them and still be kept. Four
+  // views have no votes to spare, but by seven the outlines outnumber the
+  // mistakes, and one blown edge should not punch a hole through a shoulder.
+  const allowMiss = o.allowMiss === undefined
+    ? (views.length >= 7 ? 1 : 0) : o.allowMiss;
 
   const half = (nx - 1) / 2, halfZ = (nz - 1) / 2;
   for (let y = 0; y < ny; y++) {
     for (let z = 0; z < nz; z++) {
       for (let x = 0; x < nx; x++) {
         const dx = x - half, dz = z - halfZ;
-        let keep = 1;
+        let missed = 0;
         for (const c of cams) {
           // turn the cube into the camera's frame, then look straight at it
           const u = dx * c.cos - dz * c.sin;
           const px = Math.round(c.cx + u * c.scale);
           const py = Math.round(c.top + y * c.scale);
-          if (px < 0 || py < 0 || px >= c.sil.mw || py >= c.sil.mh
-            || !c.sil.mask[py * c.sil.mw + px]) { keep = 0; break; }
+          const out = px < 0 || py < 0 || px >= c.sil.mw || py >= c.sil.mh
+            || !c.sil.mask[py * c.sil.mw + px];
+          if (out && ++missed > allowMiss) break;
         }
-        if (keep) vol.solid[vol.idx(x, y, z)] = 1;
+        if (missed <= allowMiss) vol.solid[vol.idx(x, y, z)] = 1;
       }
     }
   }
 
+  tidy(vol);
   paint(vol, cams);
+  vol.info = { scale, medH, medTop, allowMiss, views: views.length };
   return vol;
+}
+
+/**
+ * Close the pinholes and rub out the chips.
+ *
+ * A hull carved from photographs is never quite solid: a stray pixel in one
+ * outline pokes a hole through a chest, and a stray pixel the other way
+ * leaves a cube hanging in the air beside an ear. Both read as the carve
+ * having failed even when it mostly worked.
+ *
+ * Fill first, then drop. Anything with company on five of its six sides was
+ * a hole; anything with company on fewer than two was never part of a
+ * person.
+ */
+function tidy(vol) {
+  const { nx, ny, nz } = vol;
+  const around = (x, y, z) => (
+    vol.at(x + 1, y, z) + vol.at(x - 1, y, z) + vol.at(x, y + 1, z)
+    + vol.at(x, y - 1, z) + vol.at(x, y, z + 1) + vol.at(x, y, z - 1)
+  );
+  const fill = [];
+  for (let y = 0; y < ny; y++) {
+    for (let z = 0; z < nz; z++) {
+      for (let x = 0; x < nx; x++) {
+        if (!vol.at(x, y, z) && around(x, y, z) >= 5) fill.push(vol.idx(x, y, z));
+      }
+    }
+  }
+  for (const i of fill) vol.solid[i] = 1;
+
+  const drop = [];
+  for (let y = 0; y < ny; y++) {
+    for (let z = 0; z < nz; z++) {
+      for (let x = 0; x < nx; x++) {
+        if (vol.at(x, y, z) && around(x, y, z) < 2) drop.push(vol.idx(x, y, z));
+      }
+    }
+  }
+  for (const i of drop) vol.solid[i] = 0;
 }
 
 /**
@@ -321,18 +385,24 @@ function paint(vol, cams) {
 export function report(views, vol) {
   const notes = [];
   const areas = views.map((v) => v.sil.area);
-  const heights = views.map((v) => v.sil.h);
-  const lo = Math.min(...heights), hi = Math.max(...heights);
+  const medH = median(views.map((v) => v.sil.h));
   if (Math.min(...areas) < 0.02) {
-    notes.push('one of the shots has almost nothing in it — check the background');
+    notes.push('one shot has almost nothing in it — take the empty room, or find a plainer wall');
   }
   if (Math.max(...areas) > 0.55) {
-    notes.push('one of the shots is mostly foreground — the camera may have moved');
+    notes.push('one shot is mostly foreground — the camera may have moved');
   }
-  if (hi / lo > 1.25) {
-    notes.push('you are a different size in different shots — stand the same distance away');
+  // NAMED, because "one of them is wrong" is something a person can act on
+  // and "they disagree" is not
+  const odd = views
+    .map((v, i) => ({ i, name: v.name, off: Math.abs(v.sil.h - medH) / medH }))
+    .filter((v) => v.off > 0.14);
+  if (odd.length) {
+    notes.push(`a different size in ${odd.map((v) => v.name || 'one turn').join(' and ')}`
+      + ' — retake from the same spot, and it will be ignored meanwhile');
   }
   const filled = vol.count() / (vol.nx * vol.ny * vol.nz);
-  if (filled < 0.008) notes.push('almost nothing survived the carve — the outlines disagree');
-  return { notes, filled, views: views.length };
+  if (filled < 0.006) notes.push('very little survived — the outlines disagree badly');
+  if (views.length < 6) notes.push(`${views.length} turns works, but more fills it out`);
+  return { notes, filled, views: views.length, odd: odd.map((v) => v.i) };
 }

@@ -65,11 +65,13 @@ it takes a second and it is the difference between a face and a smudge.
 
 ![four photographs, carved, and made into a man](docs/carve.png)
 
-**3D.** The other way in, and the more interesting one: **four photographs
-and it works out your actual shape**. Not a face on a box — you, from every
-side. Prop the phone up, stand well back, and turn a quarter at a time while
-it takes front, side, back and side. The tab walks you through it and checks
-each shot as it arrives.
+**3D.** The other way in, and the more interesting one: **a handful of
+photographs and it works out your actual shape**. Not a face on a box — you, from every
+side. Prop the phone up, stand well back, and turn a little at a time. Four quarter
+turns is the least that works; **eight is much better**, because four
+outlines cannot tell a round shoulder from a boxy one and everything comes
+out with corners on it. The tab walks you through it and checks each shot as
+it arrives.
 
 It works by **shape from silhouette**. In each photograph it decides which
 pixels are you and which are room; then it takes a block of space where you
@@ -77,6 +79,12 @@ stood, chops it into little cubes, and asks of every cube whether it lands on
 you in *all four* pictures. Land on the room even once and the cube was never
 there. What survives is you, in cubes — spin it, then press **Turn this into
 a Minecraft man**.
+
+Every view is scaled on the **median** height of all of them rather than its
+own, which is what makes one duff photograph cost a little accuracy instead
+of most of the person: the same set with one shot taken from further back
+carves to the same neck, hip and floor, to the cube, and the app names the
+odd one out.
 
 Two consequences of the method are why the guidance is worded as it is. The
 camera must not move and you must turn on the spot, because the whole thing

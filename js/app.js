@@ -145,7 +145,12 @@ function aimHead() {
   let yaw = Math.atan2(-dx, -dz);
   while (yaw > Math.PI) yaw -= Math.PI * 2;
   while (yaw < -Math.PI) yaw += Math.PI * 2;
-  const pitch = -Math.atan2(dy, flat);
+  // Rotating a head that faces -Z about +X by a POSITIVE angle tips its face
+  // upward. So the pointer below the head — dy negative — wants a negative
+  // rotation, which is the angle itself and not its negation. Getting this
+  // backwards is not subtle: he looks at the ceiling when you point at the
+  // floor.
+  const pitch = Math.atan2(dy, flat);
   const clamp = (v, m) => (v < -m ? -m : v > m ? m : v);
   fig.parts.head.joint.rotation.y = clamp(yaw, 1.15);
   fig.parts.head.joint.rotation.x = clamp(pitch * 0.85, 0.45);
@@ -456,12 +461,29 @@ function drawSwatches() {
 // load-bearing, and the checks after each shot are there because a capture
 // that has gone wrong is much cheaper to notice now than after the carve.
 
+/**
+ * The turns.
+ *
+ * Four is the minimum a hull needs and EIGHT is what makes it look like a
+ * person. Two reasons, and the second is the one you can see: with four
+ * views the cross-section of every carve is a square, so a shoulder comes
+ * out with corners on it; and every extra outline is another chance for a
+ * cube to be voted back in when one shot has a bad edge.
+ *
+ * The four squares are asked for first because they are the ones that
+ * matter; the four diagonals are offered after, as the thing that turns a
+ * decent carve into a good one.
+ */
 const SHOTS = [
-  { key: 'plate', name: 'The empty room', angle: null, hint: 'Nobody in it. Optional, and worth more than the rest put together.' },
-  { key: 'front', name: 'Facing the camera', angle: 0 },
-  { key: 'left', name: 'Left shoulder to it', angle: 90 },
-  { key: 'back', name: 'Your back to it', angle: 180 },
-  { key: 'right', name: 'Right shoulder to it', angle: 270 },
+  { key: 'plate', name: 'The empty room', angle: null, need: false, hint: 'Nobody in it. Worth more than the rest put together.' },
+  { key: 'front', name: 'Facing the camera', angle: 0, need: true },
+  { key: 'fl', name: 'An eighth turn', angle: 45, need: false },
+  { key: 'left', name: 'Left shoulder to it', angle: 90, need: true },
+  { key: 'bl', name: 'Another eighth', angle: 135, need: false },
+  { key: 'back', name: 'Your back to it', angle: 180, need: true },
+  { key: 'br', name: 'Another eighth', angle: 225, need: false },
+  { key: 'right', name: 'Right shoulder to it', angle: 270, need: true },
+  { key: 'fr', name: 'The last eighth', angle: 315, need: false },
 ];
 
 const cap = { shots: {}, vol: null, mesh: null, wanted: null };
@@ -482,7 +504,8 @@ function drawShots() {
     }
     const who = document.createElement('div');
     who.className = 'who';
-    who.textContent = got ? spec.name : `${spec.name}${spec.hint ? ' — optional' : ''}`;
+    who.textContent = got ? spec.name
+      : spec.need ? spec.name : `${spec.name} — optional`;
     cell.appendChild(who);
     cell.onclick = () => askFor(spec.key);
     host.appendChild(cell);
@@ -490,8 +513,10 @@ function drawShots() {
   const have = SHOTS.filter((x) => x.angle !== null && cap.shots[x.key]).length;
   $('buildBtn').disabled = have < 3;
   $('capHint').textContent = have < 3
-    ? `${have} of the four turns so far — at least three before it can carve.`
-    : `${have} turns. ${have < 4 ? 'The fourth would sharpen it.' : 'That is the set.'}`;
+    ? `${have} turns so far — three at least before it can carve.`
+    : have < 4 ? `${have} turns. The fourth quarter is the one that helps most.`
+      : have < 8 ? `${have} turns. Every eighth-turn you add rounds him off further.`
+        : 'All eight. That is as good as this gets.';
 }
 
 /** A little figure showing which way to stand — clearer than the words. */
@@ -608,14 +633,14 @@ $('buildBtn').onclick = () => {
     const sil = got.sil || silhouette(got.photo, plate);
     got.sil = sil;
     if (sil.area < 0.008) continue;
-    views.push({ photo: got.photo, sil, angle: spec.angle });
+    views.push({ photo: got.photo, sil, angle: spec.angle, name: spec.name.toLowerCase() });
   }
   if (views.length < 3) {
     say('capSay', 'three usable turns at least — front, a side and the back', 'bad');
     return;
   }
   say('capSay', 'carving…');
-  const vol = carve(views, { ny: 72, nx: 40, nz: 40 });
+  const vol = carve(views, { ny: 76, nx: 44, nz: 44 });
   const rep = report(views, vol);
   cap.vol = vol;
   $('capture').hidden = true;
