@@ -160,6 +160,25 @@
     background: rgba(255,209,102,.06); color: var(--ink-dim); font-size: 12px; border-radius: 0 6px 6px 0;
   }
 
+  /* ---- the guided capture ---------------------------------------------- */
+  ol.steps { margin: 10px 0 14px; padding-left: 22px; color: var(--ink); font-size: 13px; }
+  ol.steps li { margin: 8px 0; }
+  ol.steps b { color: var(--white); font-weight: 600; }
+  #shots { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 9px; }
+  .shot {
+    position: relative; border: 1px solid var(--line); border-radius: 9px; overflow: hidden;
+    background: #0e1626; cursor: pointer; aspect-ratio: 3 / 4;
+    display: flex; align-items: center; justify-content: center; text-align: center;
+  }
+  .shot.done { border-color: var(--blue-lit); }
+  .shot img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+  .shot .who {
+    position: relative; z-index: 2; font-size: 11.5px; color: var(--ink); padding: 6px;
+    text-shadow: 0 1px 4px #000;
+  }
+  .shot.done .who { align-self: flex-end; width: 100%; background: rgba(9,13,24,.72); }
+  .shot .turn { position: absolute; inset: 0; z-index: 1; opacity: .5; }
+
   /* ---- the wardrobe ---------------------------------------------------- */
   #cats button {
     display: flex; width: 100%; justify-content: space-between; align-items: center;
@@ -235,6 +254,7 @@
     <div id="tabs">
       <button data-tab="photo" class="on">Photo</button>
       <button data-tab="face">Face</button>
+      <button data-tab="three">3D</button>
       <button data-tab="wear">Wear</button>
       <button data-tab="paint">Paint</button>
       <button data-tab="save">Save</button>
@@ -315,6 +335,72 @@
       </section>
 
       <!-- ============================ LOOK ============================= -->
+      <!-- ============================= 3D ============================== -->
+      <section class="panel" data-panel="three">
+        <div id="howto">
+          <h2>Photograph yourself all the way round</h2>
+          <div class="hint">
+            Four photographs and the program can work out your actual shape — not
+            a face on a box, <b>you</b>, from every side. It does it by taking the
+            outline of you in each shot and carving away everything that cannot be
+            inside all four at once. That means the shots have to agree with each
+            other, and these five things are what make them agree:
+          </div>
+          <ol class="steps">
+            <li><b>Prop the phone up and do not touch it.</b> A table, a shelf, a
+              friend who can keep still. If the camera moves between shots, nothing
+              below works.</li>
+            <li><b>Stand well back, all of you in frame</b> — head to feet, with a
+              hand's width of room above and below.</li>
+            <li><b>Hold your arms a little away from your sides.</b> This is the one
+              people skip. An arm touching your ribs cannot be told from your ribs,
+              and you come out as a barrel.</li>
+            <li><b>A plain wall behind you</b>, and don't wear the colour of it.</li>
+            <li><b>Turn a quarter at a time, on the same spot.</b> Face the camera,
+              then your left shoulder to it, then your back, then your right.</li>
+          </ol>
+          <div class="hint">Take the <b>empty room</b> first if you can — one shot with
+            nobody in it. It costs five seconds and it is worth more than the other
+            four put together, because then the program knows exactly what is room and
+            what is you.</div>
+          <div class="btns"><button id="startCap" class="key">Start</button></div>
+        </div>
+
+        <div id="capture" hidden>
+          <div id="shots"></div>
+          <div class="say" id="capSay"></div>
+          <input type="file" id="capIn" accept="image/*" hidden>
+          <input type="file" id="capCam" accept="image/*" capture="environment" hidden>
+          <div class="btns">
+            <button id="buildBtn" class="key">Build the 3D</button>
+            <button id="capReset">Start over</button>
+          </div>
+          <div class="hint" id="capHint">Fill in at least the front, a side and the
+            back. More sides, better shape.</div>
+        </div>
+
+        <div id="built" hidden>
+          <h2>You, in cubes</h2>
+          <canvas id="volView" class="board" width="520" height="520"></canvas>
+          <div class="row">
+            <label for="spinVol">turn</label>
+            <input type="range" id="spinVol" min="0" max="360" step="2" value="20"><output id="spinVolOut">20</output>
+          </div>
+          <div class="say" id="builtSay"></div>
+          <button id="toMcBtn" class="big key">Turn this into a Minecraft man</button>
+          <div class="btns">
+            <button id="showVolBtn">Show it beside the figure</button>
+            <button id="againBtn">Take them again</button>
+          </div>
+          <div class="hint">
+            What you are looking at is the <b>visual hull</b>: the tightest shape your
+            four outlines allow. It cannot see into a dimple and it cannot see the gap
+            between an arm and a ribcage — which for a photograph would be a fatal
+            limitation and for a man made of cubes is not a limitation at all.
+          </div>
+        </div>
+      </section>
+
       <!-- ============================ WEAR ============================= -->
       <section class="panel" data-panel="wear">
         <div id="cats"></div>

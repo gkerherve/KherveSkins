@@ -140,6 +140,56 @@ rather than reasoned about:
   one edge of a limb, invisible until you photograph the model against a
   colour that is not the page.
 
+## The carve
+
+`js/carve.js` is shape-from-silhouette, and it is the only photogrammetry
+that belongs in this program: no model to download, no build step, nothing
+about lenses, and its natural output is CUBES, which is what the destination
+is made of. Four outlines, a block of space, and every cube that misses the
+person in any one view is carved away.
+
+Its limits are honest and worth knowing before trying to fix them. A hull is
+the tightest shape the outlines allow and never tighter — it cannot see into
+a dimple, and with four views the cross-sections are square, which is why a
+45-degree view of the result looks boxier than the front. More views would
+round it; nothing else will.
+
+Three things that cost time and would cost it again:
+
+- **`mw`/`mh` are the picture, `x/y/w/h` are the person in it.** Spreading
+  the bounding box over the mask's own `w`/`h` made every projection read the
+  wrong row, silently, and the carve returned zero cubes with no error.
+- **Line the views up on the HEAD, not on the outline's middle.** A person
+  turning on the spot keeps their head over the axis; their silhouette centre
+  moves, because a shoulder is wider than a chest.
+- **An arm that does not touch the body is a separate blob**, and
+  `keepLargest` will bin it. Real arms attach at the shoulder so this is fine
+  in practice — but it is why the test generator draws a yoke, and it is the
+  reason the guidance asks for daylight at the ribs and not at the shoulder.
+
+`js/fit.js` maps the carve onto the model, and the fact it exists to deal
+with is that **a person is seven and a half heads tall and a Minecraft man is
+four**. So the mapping is anatomical, not a scale: find the neck, the hips
+and the floor and pin them to the joins between the boxes — the same trick as
+the eye line, one ring out.
+
+Two mistakes already made there, both of which produce a figure that renders
+happily and is wrong:
+
+- **Every part needs its OWN box of cubes.** One scale for the whole figure
+  cannot work: the model's head is as wide as its chest and a real head is
+  half as wide, so a head box sized off the torso reaches past the ears and
+  samples nothing.
+- **Count the leg-split within the TRUNK's columns.** Arms held clear of the
+  sides make three runs across a slice from shoulder to wrist, so "how many
+  runs" answers three long before it answers two, and puts the hips in the
+  ribs.
+
+`python tools/make_test_turns.py` draws the four views plus the empty room,
+of a figure whose neck, hips and floor are known. The carve should land on
+16 / 45 / 71 of 72 cubes. If it drifts, that is a regression however good the
+render looks.
+
 ## The wardrobe
 
 `js/wardrobe.js` is a hundred and twenty-five items across nine categories,
@@ -211,6 +261,10 @@ asking anybody to look:
 | `__size(n)` | change the resolution, or ask what it is |
 | `__wear(cat, id)` | put something on, or ask what is on |
 | `__openCat(key)` | open one rack of the wardrobe, or go back to the list |
+| `__shot(key, url)` | hand the capture one of its five photographs |
+| `__build()` | carve, and say how many cubes survived |
+| `__toMc()` | turn the carve into a skin |
+| `__cap` | the shots, the volume and the voxel mesh |
 | `__paint(x, y, hex)` | lay one texel exactly as a click would |
 | `capture(name)` | POST the render to `shots/NAME.png` |
 | `captureSkin(name)` | POST the 64×64 itself |

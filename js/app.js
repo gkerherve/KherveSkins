@@ -25,6 +25,9 @@ import * as store from './store.js';
 import { parts, regions, SIZES, BASE } from './layout.js';
 import { CATEGORIES, DEFAULT_WEAR, EXTRA_COLOURS } from './wardrobe.js';
 import { drawDoll, CROPS } from './doll.js';
+import { silhouette, carve, report } from './carve.js';
+import { buildVoxels, previewVolume } from './voxel.js';
+import { fitToSkin } from './fit.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -379,6 +382,241 @@ function drawSwatches() {
     host.appendChild(row);
   }
 }
+
+// ---------------------------------------------------------------------------
+// the guided capture, and the carve
+// ---------------------------------------------------------------------------
+//
+// Four photographs, taken to a script, and out of them the person's actual
+// shape. The script is not decoration: shape-from-silhouette assumes one
+// still camera and one axis of rotation, so every instruction on that card is
+// load-bearing, and the checks after each shot are there because a capture
+// that has gone wrong is much cheaper to notice now than after the carve.
+
+const SHOTS = [
+  { key: 'plate', name: 'The empty room', angle: null, hint: 'Nobody in it. Optional, and worth more than the rest put together.' },
+  { key: 'front', name: 'Facing the camera', angle: 0 },
+  { key: 'left', name: 'Left shoulder to it', angle: 90 },
+  { key: 'back', name: 'Your back to it', angle: 180 },
+  { key: 'right', name: 'Right shoulder to it', angle: 270 },
+];
+
+const cap = { shots: {}, vol: null, mesh: null, wanted: null };
+
+function drawShots() {
+  const host = $('shots');
+  host.textContent = '';
+  for (const spec of SHOTS) {
+    const got = cap.shots[spec.key];
+    const cell = document.createElement('div');
+    cell.className = `shot${got ? ' done' : ''}`;
+    if (got) {
+      const img = document.createElement('img');
+      img.src = got.thumb;
+      cell.appendChild(img);
+    } else {
+      cell.appendChild(turnIcon(spec.angle));
+    }
+    const who = document.createElement('div');
+    who.className = 'who';
+    who.textContent = got ? spec.name : `${spec.name}${spec.hint ? ' — optional' : ''}`;
+    cell.appendChild(who);
+    cell.onclick = () => askFor(spec.key);
+    host.appendChild(cell);
+  }
+  const have = SHOTS.filter((x) => x.angle !== null && cap.shots[x.key]).length;
+  $('buildBtn').disabled = have < 3;
+  $('capHint').textContent = have < 3
+    ? `${have} of the four turns so far — at least three before it can carve.`
+    : `${have} turns. ${have < 4 ? 'The fourth would sharpen it.' : 'That is the set.'}`;
+}
+
+/** A little figure showing which way to stand — clearer than the words. */
+function turnIcon(angle) {
+  const c = document.createElement('canvas');
+  c.className = 'turn';
+  c.width = 90; c.height = 120;
+  const x = c.getContext('2d');
+  x.fillStyle = '#26314e';
+  const body = (cx, cy) => {
+    x.fillRect(cx - 9, cy - 34, 18, 18);        // head
+    x.fillRect(cx - 13, cy - 14, 26, 30);       // torso
+    x.fillRect(cx - 9, cy + 16, 7, 24);         // legs
+    x.fillRect(cx + 2, cy + 16, 7, 24);
+  };
+  body(45, 46);
+  if (angle === null) {
+    x.clearRect(0, 0, c.width, c.height);
+    x.strokeStyle = '#33405e';
+    x.lineWidth = 3;
+    x.strokeRect(14, 22, 62, 78);
+    return c;
+  }
+  // an arrow round the feet showing the quarter turn
+  x.strokeStyle = '#3d78d8';
+  x.lineWidth = 3;
+  x.beginPath();
+  x.ellipse(45, 100, 26, 9, 0, 0, Math.PI * 2);
+  x.stroke();
+  x.fillStyle = '#6ba0ff';
+  const a = (angle - 90) * Math.PI / 180;
+  x.beginPath();
+  x.arc(45 + Math.cos(a) * 26, 100 + Math.sin(a) * 9, 5, 0, Math.PI * 2);
+  x.fill();
+  return c;
+}
+
+function askFor(key) {
+  cap.wanted = key;
+  // a phone should open the camera; a desktop should open the file picker
+  const touch = matchMedia('(pointer: coarse)').matches;
+  $(touch ? 'capCam' : 'capIn').click();
+}
+
+async function tookShot(file) {
+  if (!cap.wanted || !file) return;
+  const key = cap.wanted;
+  cap.wanted = null;
+  try {
+    const img = await loadImage(file);
+    const photo = new Photo(img);
+    const c = document.createElement('canvas');
+    c.width = 120; c.height = 160;
+    const cx = c.getContext('2d');
+    cx.drawImage(photo.canvas, 0, 0, c.width, c.height);
+    cap.shots[key] = { photo, thumb: c.toDataURL('image/png') };
+    drawShots();
+    checkShot(key);
+  } catch (e) {
+    say('capSay', e.message || 'could not read that', 'bad');
+  }
+}
+
+/**
+ * Look at the shot that was just taken and say if it is trouble.
+ *
+ * Cheap now, expensive later: a carve made from one bad outline is not
+ * obviously wrong to look at, it is just a slightly odd person, and by then
+ * nobody remembers which photograph was the bad one.
+ */
+function checkShot(key) {
+  if (key === 'plate') {
+    say('capSay', 'the room is on file — now stand in it', 'good');
+    return;
+  }
+  const plate = cap.shots.plate;
+  const sil = silhouette(cap.shots[key].photo, plate ? plate.photo : null);
+  cap.shots[key].sil = sil;
+  const frac = sil.h / cap.shots[key].photo.h;
+  if (sil.area < 0.015) {
+    say('capSay', 'cannot find you in that one — plainer background, or take the empty room first', 'bad');
+  } else if (frac > 0.97) {
+    say('capSay', 'you are running off the top or bottom — stand further back', 'bad');
+  } else if (frac < 0.45) {
+    say('capSay', 'you are rather small in frame — closer, or turn the phone upright', '');
+  } else {
+    say('capSay', 'good — that one is usable', 'good');
+  }
+}
+
+$('startCap').onclick = () => {
+  $('howto').hidden = true;
+  $('capture').hidden = false;
+  $('built').hidden = true;
+  drawShots();
+};
+$('capIn').onchange = (e) => { tookShot(e.target.files[0]); e.target.value = ''; };
+$('capCam').onchange = (e) => { tookShot(e.target.files[0]); e.target.value = ''; };
+$('capReset').onclick = () => {
+  cap.shots = {};
+  cap.vol = null;
+  drawShots();
+  say('capSay', '', '');
+};
+$('againBtn').onclick = () => { $('built').hidden = true; $('capture').hidden = false; };
+
+$('buildBtn').onclick = () => {
+  const plate = cap.shots.plate ? cap.shots.plate.photo : null;
+  const views = [];
+  for (const spec of SHOTS) {
+    if (spec.angle === null) continue;
+    const got = cap.shots[spec.key];
+    if (!got) continue;
+    const sil = got.sil || silhouette(got.photo, plate);
+    got.sil = sil;
+    if (sil.area < 0.008) continue;
+    views.push({ photo: got.photo, sil, angle: spec.angle });
+  }
+  if (views.length < 3) {
+    say('capSay', 'three usable turns at least — front, a side and the back', 'bad');
+    return;
+  }
+  say('capSay', 'carving…');
+  const vol = carve(views, { ny: 72, nx: 40, nz: 40 });
+  const rep = report(views, vol);
+  cap.vol = vol;
+  $('capture').hidden = true;
+  $('built').hidden = false;
+  $('spinVol').value = 20;
+  previewVolume($('volView'), vol, 20 * Math.PI / 180);
+  const cubes = vol.count();
+  say('builtSay', rep.notes.length
+    ? `${cubes} cubes — but: ${rep.notes.join('; ')}`
+    : `${cubes} cubes, from ${views.length} turns`,
+  rep.notes.length ? 'bad' : 'good');
+};
+
+$('spinVol').oninput = (e) => {
+  $('spinVolOut').textContent = e.target.value;
+  if (cap.vol) previewVolume($('volView'), cap.vol, (+e.target.value) * Math.PI / 180);
+};
+
+/** Stand the carved person next to the figure, or take them away again. */
+$('showVolBtn').onclick = () => {
+  if (cap.mesh) {
+    scene.remove(cap.mesh.mesh);
+    cap.mesh.dispose();
+    cap.mesh = null;
+    fig.group.position.x = 0;
+    $('showVolBtn').textContent = 'Show it beside the figure';
+    return;
+  }
+  if (!cap.vol) return;
+  cap.mesh = buildVoxels(cap.vol, { height: 2 });
+  cap.mesh.mesh.position.x = 0.7;
+  fig.group.position.x = -0.7;
+  scene.add(cap.mesh.mesh);
+  $('showVolBtn').textContent = 'Take it away';
+};
+
+/**
+ * The carved person, made into a Minecraft man.
+ *
+ * This is where the two halves of the program meet: everything downstream —
+ * the wardrobe, the painter, the export — works on a skin, and out of here
+ * comes a skin like any other.
+ */
+$('toMcBtn').onclick = () => {
+  if (!cap.vol) return;
+  S.photo = null;
+  S.frame = null;
+  S.edits.clear();
+  cropper.setPhoto(null);
+  cropper.setFrame(null);
+  $('dropNote').style.display = '';
+  const L = fitToSkin(S.skin, cap.vol, {
+    slim: S.opts.slim,
+    skinTone: S.pal && S.pal.skin ? S.pal.skin : null,
+  });
+  S.base = S.skin.snapshot();
+  S.pal = null;
+  refresh();
+  drawSwatches();
+  drawCats();
+  showTab('paint');
+  say('builtSay',
+    `made — neck at ${L.neck}, hips at ${L.hip} of ${L.height} cubes tall`, 'good');
+};
 
 // ---------------------------------------------------------------------------
 // the wardrobe
@@ -956,6 +1194,14 @@ Object.assign(window, {
   },
   __cats: () => CATEGORIES.map((c) => ({ key: c.key, n: c.items.length })),
   __openCat: (k) => (k ? openRack(k) : closeRack()),
+  __cap: cap,
+  async __shot(key, url) {
+    cap.wanted = key;
+    await tookShot(url);
+    return Object.keys(cap.shots);
+  },
+  __build: () => { $('buildBtn').click(); return cap.vol ? cap.vol.count() : 0; },
+  __toMc: () => { $('toMcBtn').click(); return true; },
   __png: () => S.skin.toDataURL(),
   __view: view,
   __fig: () => fig,

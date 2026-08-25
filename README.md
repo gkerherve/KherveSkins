@@ -62,6 +62,25 @@ sampler pins the eye line, the mouth line and both eyes onto whole texels
 before it averages anything. When the automatic guess is wrong, drag them;
 it takes a second and it is the difference between a face and a smudge.
 
+**3D.** The other way in, and the more interesting one: **four photographs
+and it works out your actual shape**. Not a face on a box — you, from every
+side. Prop the phone up, stand well back, and turn a quarter at a time while
+it takes front, side, back and side. The tab walks you through it and checks
+each shot as it arrives.
+
+It works by **shape from silhouette**. In each photograph it decides which
+pixels are you and which are room; then it takes a block of space where you
+stood, chops it into little cubes, and asks of every cube whether it lands on
+you in *all four* pictures. Land on the room even once and the cube was never
+there. What survives is you, in cubes — spin it, then press **Turn this into
+a Minecraft man**.
+
+Two consequences of the method are why the guidance is worded as it is. The
+camera must not move and you must turn on the spot, because the whole thing
+assumes one axis of rotation. And **hold your arms a little away from your
+sides** — an arm touching your ribs cannot be told from your ribs, and you
+come out as a barrel.
+
 **Face.** Which of the eight rows the eyes and the mouth sit on, and the tone
 of the photograph — brightness, contrast, colour, warmth, sharpness. Also
 *features*: how hard the eyes, the brow line and the mouth are drawn on top
@@ -127,6 +146,11 @@ Nine files, and each one has a job:
 | `js/model.js` | the figure in three dimensions, and the walk |
 | `js/cropper.js` | the box, the two lines and the two pins |
 | `js/paint.js` | the flat editor, and mirroring |
+| `js/carve.js` | telling a person from a room, and carving the visual hull |
+| `js/voxel.js` | showing the carved person |
+| `js/fit.js` | the carved person, made into a Minecraft man |
+| `js/wardrobe.js` | a hundred and twenty-five garments, each a function |
+| `js/doll.js` | the little figures in the wardrobe's grid |
 | `js/store.js` | the shelf, and every way out |
 | `js/app.js` | what is wired to what |
 
