@@ -256,6 +256,66 @@ function bounds(mask, w, h) {
   };
 }
 
+/**
+ * The head, cut out of a whole-body outline.
+ *
+ * Everything downstream — the scale, the centring, the volume — is driven by
+ * the silhouette's `y`, `h` and `headX`, so restricting the carve to a head
+ * is a matter of handing it a silhouette that SAYS it is a head. The mask is
+ * untouched: the volume simply never reaches down as far as the shoulders.
+ *
+ * The neck is the narrowest row between a twentieth and a third of the way
+ * down, which is the same pinch `fit.js` looks for in three dimensions. Above
+ * it is head; below it is somebody's chest.
+ *
+ * Worth doing because a head is nearly CONVEX, and a visual hull is exact for
+ * convex things. A body is not: arms and legs stand off it, and the hull can
+ * only ever be the tightest box the outlines allow round all of them. So the
+ * same photographs describe a head far better than they describe a person —
+ * and the head is the half anybody recognises.
+ */
+export function headOf(sil) {
+  if (!sil || sil.h < 12) return sil;
+  const rows = new Int32Array(sil.h);
+  for (let j = 0; j < sil.h; j++) {
+    const y = sil.y + j;
+    if (y < 0 || y >= sil.mh) continue;
+    let n = 0;
+    for (let x = Math.max(0, sil.x); x < Math.min(sil.mw, sil.x + sil.w); x++) {
+      if (sil.mask[y * sil.mw + x]) n++;
+    }
+    rows[j] = n;
+  }
+  let neck = Math.round(sil.h * 0.17), narrow = Infinity;
+  for (let j = Math.round(sil.h * 0.05); j < Math.round(sil.h * 0.32); j++) {
+    if (rows[j] && rows[j] < narrow) { narrow = rows[j]; neck = j; }
+  }
+  const h = Math.max(6, neck + 1);
+  let x0 = sil.mw, x1 = -1, n = 0, sum = 0, count = 0;
+  const crown = Math.round(h * 0.35);
+  for (let j = 0; j < h; j++) {
+    const y = sil.y + j;
+    if (y < 0 || y >= sil.mh) continue;
+    for (let x = Math.max(0, sil.x); x < Math.min(sil.mw, sil.x + sil.w); x++) {
+      if (!sil.mask[y * sil.mw + x]) continue;
+      n++;
+      if (x < x0) x0 = x;
+      if (x > x1) x1 = x;
+      if (j <= crown) { sum += x; count++; }
+    }
+  }
+  if (x1 < 0) return sil;
+  return {
+    ...sil,
+    x: x0,
+    y: sil.y,
+    w: x1 - x0 + 1,
+    h,
+    area: n / (sil.mw * sil.mh),
+    headX: count ? sum / count : (x0 + x1) / 2,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // the carve
 // ---------------------------------------------------------------------------

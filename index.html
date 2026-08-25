@@ -436,6 +436,13 @@
             eaten your head, or taken in your shadow or half the wall, that is the
             shot to retake.</div>
 
+          <label class="check"><input type="checkbox" id="faceOnly">
+            <span>just the head, in much more detail</span></label>
+          <div class="hint" id="faceOnlyNote">Everything else is unchanged — the same
+            photographs, the same empty room. It carves only from the crown to the
+            neck, so the whole grid goes on the head: about fifty cubes across a face
+            instead of ten. The body keeps whatever it already had.</div>
+
           <div class="btns">
             <button id="buildBtn" class="key">Build the 3D</button>
             <button id="capReset">Start over</button>
@@ -443,7 +450,7 @@
         </div>
 
         <div id="built" hidden>
-          <h2>You, in cubes</h2>
+          <h2 id="builtTitle">You, in cubes</h2>
           <canvas id="volView" class="board" width="520" height="520"></canvas>
           <div class="row">
             <label for="spinVol">turn</label>
@@ -451,6 +458,7 @@
           </div>
           <div class="say" id="builtSay"></div>
           <button id="toMcBtn" class="big key">Turn this into a Minecraft man</button>
+          <div class="hint" id="toMcNote"></div>
           <div class="btns">
             <button id="showVolBtn">Show it beside the figure</button>
             <button id="againBtn">Take them again</button>
@@ -462,6 +470,10 @@
             limitation and for a man made of cubes is not a limitation at all. If it
             looks blocky at the corners, that is four outlines rather than eight —
             <b>Take them again</b> and fill in the diagonals.
+            <br><br>The head is the part this does best, and there is a reason: a head
+            is very nearly <b>convex</b>, and a visual hull is exact for convex things.
+            A body is not — arms and legs stand off it and the hull can only be the
+            tightest shape the outlines allow round all of them.
           </div>
         </div>
       </section>

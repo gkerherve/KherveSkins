@@ -16,7 +16,7 @@
 
 import * as THREE from 'three';
 import { Skin, loadImage, rgbToHex } from './pixels.js';
-import { Photo, autoFace } from './photo.js';
+import { Photo, autoFace, heuristicFace } from './photo.js';
 import { generate, blank, DEFAULTS } from './generate.js';
 import { buildFigure, skinTexture, pose, orbit, pickTexel, scene as makeScene } from './model.js';
 import { Cropper } from './cropper.js';
@@ -25,12 +25,17 @@ import * as store from './store.js';
 import { parts, regions, SIZES, BASE } from './layout.js';
 import { CATEGORIES, DEFAULT_WEAR, EXTRA_COLOURS } from './wardrobe.js';
 import { drawDoll, CROPS } from './doll.js';
-import { silhouette, carve, report } from './carve.js';
+import { silhouette, carve, report, headOf } from './carve.js';
+import { facesFromViews, primeHeuristic } from './faces3d.js';
 import { assignAngles, checkSet } from './turns.js';
 import { buildVoxels, previewVolume } from './voxel.js';
 import { fitToSkin } from './fit.js';
 
 const $ = (id) => document.getElementById(id);
+
+// the head path wants a frame NOW, and the browser's own face detector is
+// asynchronous; ours is not, so hand it over
+primeHeuristic(heuristicFace);
 
 const S = {
   photo: null,
@@ -504,6 +509,7 @@ const cap = {
   vol: null,
   mesh: null,
   wanted: null,
+  headOnly: false,
 };
 
 /**
@@ -673,21 +679,41 @@ $('capReset').onclick = () => {
 $('againBtn').onclick = () => { $('built').hidden = true; $('capture').hidden = false; };
 
 $('buildBtn').onclick = () => {
-  const views = cap.angles
+  cap.headOnly = $('faceOnly').checked;
+  const whole = cap.angles
     .filter((t) => t.sil && t.sil.area > 0.008)
     .map((t) => ({ photo: t.photo, sil: t.sil, angle: t.angle, name: t.name }));
-  if (views.length < 3) {
+  if (whole.length < 3) {
     say('capSay', 'three usable photographs at least — a front, a side and a back', 'bad');
     return;
   }
+  cap.whole = whole;
+  // Head only: the same outlines, cut off at the neck. Nothing else changes —
+  // the volume is simply hung on a head's height instead of a person's, so
+  // every cube it has goes on the part anybody recognises.
+  const views = cap.headOnly
+    ? whole.map((v) => ({ ...v, sil: headOf(v.sil) }))
+    : whole;
   say('capSay', `carving from ${views.length}…`);
-  const vol = carve(views, { ny: 76, nx: 44, nz: 44 });
+  // a head is wider for its height than a body is, so the block it is carved
+  // out of is a different shape
+  const vol = cap.headOnly
+    ? carve(views, { ny: 56, nx: 52, nz: 52 })
+    : carve(views, { ny: 76, nx: 44, nz: 44 });
   const rep = report(views, vol);
   cap.vol = vol;
   $('capture').hidden = true;
   $('built').hidden = false;
   $('spinVol').value = 20;
   previewVolume($('volView'), vol, 20 * Math.PI / 180);
+  $('builtTitle').textContent = cap.headOnly ? 'Your head, in cubes' : 'You, in cubes';
+  $('toMcBtn').textContent = cap.headOnly
+    ? 'Put this head on him' : 'Turn this into a Minecraft man';
+  $('toMcNote').textContent = cap.headOnly
+    ? 'The six squares of the head are taken straight from the photographs — the '
+      + 'one shot most nearly square-on to each — rather than through the cubes, '
+      + 'which would blur them twice. Everything below the neck is left as it is.'
+    : '';
   const cubes = vol.count();
   say('builtSay', rep.notes.length
     ? `${cubes} cubes from ${views.length} photographs — but: ${rep.notes.join('; ')}`
@@ -727,6 +753,35 @@ $('showVolBtn').onclick = () => {
  */
 $('toMcBtn').onclick = () => {
   if (!cap.vol) return;
+
+  // --- the head on its own -------------------------------------------------
+  //
+  // Kept as hand-painting rather than replacing the skin, because that is
+  // exactly what it is: texels somebody put there deliberately, which have to
+  // survive every later rebuild the same way a brush stroke does. The body
+  // keeps its photograph, its clothes and its colours.
+  if (cap.headOnly) {
+    const used = facesFromViews(S.skin, cap.whole, { ...S.opts, slim: S.opts.slim });
+    if (!used) { say('builtSay', 'could not find a head in those', 'bad'); return; }
+    const head = parts(S.opts.slim, S.skin.size).find((p) => p.key === 'head');
+    for (const face of ['top', 'bottom', 'right', 'front', 'left', 'back']) {
+      for (const rect of [head.rects[face], head.overRects[face]]) {
+        for (let v = 0; v < rect[3]; v++) {
+          for (let u = 0; u < rect[2]; u++) {
+            noteEdit(rect[0] + u, rect[1] + v, S.skin.get(rect[0] + u, rect[1] + v));
+          }
+        }
+      }
+    }
+    refresh();
+    showTab('paint');
+    const where = Object.entries(used)
+      .map(([f, w]) => `${f} ${w.off}° off`).join(', ');
+    say('builtSay', `head done — ${where}`, 'good');
+    return;
+  }
+
+  // --- the whole man -------------------------------------------------------
   S.photo = null;
   S.frame = null;
   S.edits.clear();
@@ -1464,6 +1519,7 @@ Object.assign(window, {
   __flip: () => { cap.flip = !cap.flip; reread(); return !!cap.flip; },
   __build: () => { $('buildBtn').click(); return cap.vol ? cap.vol.count() : 0; },
   __toMc: () => { $('toMcBtn').click(); return true; },
+  __faceOnly: (on) => { $('faceOnly').checked = !!on; return $('faceOnly').checked; },
   __png: () => S.skin.toDataURL(),
   __view: view,
   __fig: () => fig,
