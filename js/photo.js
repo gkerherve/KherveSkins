@@ -10,8 +10,8 @@ const MAX_SIDE = 900;
 
 /** A photograph, at a size worth working at, with its pixels to hand. */
 export class Photo {
-  constructor(image) {
-    const scale = Math.min(1, MAX_SIDE / Math.max(image.width, image.height));
+  constructor(image, maxSide = MAX_SIDE) {
+    const scale = Math.min(1, maxSide / Math.max(image.width, image.height));
     this.w = Math.max(1, Math.round(image.width * scale));
     this.h = Math.max(1, Math.round(image.height * scale));
     this.canvas = document.createElement('canvas');

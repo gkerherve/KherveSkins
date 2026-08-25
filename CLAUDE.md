@@ -196,6 +196,21 @@ out of eight costs a little accuracy and nothing else, which is measurable:
 the same set with one shot deliberately taken from further back carves to the
 same neck, hip and floor, to the cube.
 
+**The capture is a BAG of photographs, not a list of slots.** One plate, then
+as many turns as somebody cares to take, in any number — `js/turns.js` works
+out what angle each one is. Three facts do it: they are in the order they were
+taken (a phone names files that way, so a natural sort recovers the sequence,
+and the angles are that sequence spread evenly round a circle); the front is
+found by taking the WIDE axis first (a body is wider across than deep, which
+rules out the profiles) and then the end of it with more skin in the head band
+(a face rather than the back of a head); and the direction, which barely shows
+in a silhouette at all, is a fixed default unless the evidence is decisive —
+because a guess that is right half the time returns a mirror image half the
+time, and one toggle fixes it either way.
+
+Verified at 4, 5, 10 and 20 photographs, handed in starting from the back:
+every angle recovered exactly, direction included.
+
 **Four turns is the minimum and eight is the point.** With four, every
 cross-section of the hull is a square, so shoulders come out with corners on
 them — visible the moment you turn it 45 degrees. Past seven views a cube is
@@ -215,6 +230,17 @@ Three more things that cost time and would cost it again:
   beside an ear; both read as the carve having failed when it mostly worked.
   Fill anything with company on five sides, drop anything with company on
   fewer than two.
+- **A test figure must be a rigid 3D OBJECT.** The room figure was drawn
+  per-angle, which is not the projection of anything — with four views the
+  inconsistency hid in the slack and with twenty it carved the legs clean off,
+  and for a while that looked like a bug in the program. It is now a set of
+  upright elliptical columns at fixed places, projected properly. A test
+  object that is not a real object cannot test a method that reconstructs
+  real objects.
+- **Feet together breaks the hip** the same way arms-down breaks the trunk.
+  The fork-finding loop has to scan up from the floor and only accept a
+  closing fork after it has SEEN one, or a person standing with their feet
+  together gets their hips reported at their ankles.
 - **An arm that does not touch the body is a separate blob**, and
   `keepLargest` will bin it. Real arms attach at the shoulder so this is fine
   in practice — but it is why the test generator draws a yoke, and it is the

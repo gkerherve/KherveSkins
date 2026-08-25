@@ -69,7 +69,12 @@ def figure(d: ImageDraw.ImageDraw, angle: int) -> None:
     a = math.radians(angle)
     # half-width of each part, front-on and in profile
     def w(front: float, side: float) -> int:
-        return max(2, int(abs(front * math.cos(a)) + abs(side * math.sin(a))))
+        # An ELLIPSE, not a box. Widths that simply ADD make the diagonal view
+        # the widest of the lot, which no torso does — and a program that
+        # finds the front by looking for the widest outline would then be
+        # tested against a figure that is widest at forty-five degrees. A body
+        # in cross-section is an ellipse and projects as one.
+        return max(2, int(math.hypot(front * math.cos(a), side * math.sin(a))))
 
     # legs
     y0, y1 = band(LEGS[0]), band(LEGS[1])

@@ -26,6 +26,7 @@ import { parts, regions, SIZES, BASE } from './layout.js';
 import { CATEGORIES, DEFAULT_WEAR, EXTRA_COLOURS } from './wardrobe.js';
 import { drawDoll, CROPS } from './doll.js';
 import { silhouette, carve, report } from './carve.js';
+import { assignAngles, checkSet } from './turns.js';
 import { buildVoxels, previewVolume } from './voxel.js';
 import { fitToSkin } from './fit.js';
 
@@ -254,8 +255,20 @@ $('camIn').onchange = (e) => e.target.files[0] && takePhoto(e.target.files[0]);
 addEventListener('dragover', (e) => { e.preventDefault(); });
 addEventListener('drop', (e) => {
   e.preventDefault();
-  const f = [...(e.dataTransfer.files || [])].find((x) => x.type.startsWith('image/'));
-  if (f) { showTab('photo'); takePhoto(f); }
+  const files = [...(e.dataTransfer.files || [])].filter((x) => x.type.startsWith('image/'));
+  if (!files.length) return;
+  // more than one picture, or the 3D tab already open, means a capture; one
+  // picture on any other tab means a portrait
+  const onThree = document.querySelector('.panel[data-panel="three"]').classList.contains('on');
+  if (files.length > 1 || onThree) {
+    showTab('three');
+    $('howto').hidden = true;
+    $('capture').hidden = false;
+    addTurns(files);
+  } else {
+    showTab('photo');
+    takePhoto(files[0]);
+  }
 });
 addEventListener('paste', (e) => {
   const item = [...(e.clipboardData?.items || [])].find((x) => x.type.startsWith('image/'));
@@ -474,110 +487,24 @@ function drawSwatches() {
  * matter; the four diagonals are offered after, as the thing that turns a
  * decent carve into a good one.
  */
-const SHOTS = [
-  { key: 'plate', name: 'The empty room', angle: null, need: false, hint: 'Nobody in it. Worth more than the rest put together.' },
-  { key: 'front', name: 'Facing the camera', angle: 0, need: true },
-  { key: 'fl', name: 'An eighth turn', angle: 45, need: false },
-  { key: 'left', name: 'Left shoulder to it', angle: 90, need: true },
-  { key: 'bl', name: 'Another eighth', angle: 135, need: false },
-  { key: 'back', name: 'Your back to it', angle: 180, need: true },
-  { key: 'br', name: 'Another eighth', angle: 225, need: false },
-  { key: 'right', name: 'Right shoulder to it', angle: 270, need: true },
-  { key: 'fr', name: 'The last eighth', angle: 315, need: false },
-];
-
-const cap = { shots: {}, vol: null, mesh: null, wanted: null };
-
-function drawShots() {
-  const host = $('shots');
-  host.textContent = '';
-  for (const spec of SHOTS) {
-    const got = cap.shots[spec.key];
-    const cell = document.createElement('div');
-    cell.className = `shot${got ? ' done' : ''}`;
-    if (got) {
-      const img = document.createElement('img');
-      img.src = got.thumb;
-      cell.appendChild(img);
-    } else {
-      cell.appendChild(turnIcon(spec.angle));
-    }
-    const who = document.createElement('div');
-    who.className = 'who';
-    who.textContent = got ? spec.name
-      : spec.need ? spec.name : `${spec.name} — optional`;
-    cell.appendChild(who);
-    cell.onclick = () => askFor(spec.key);
-    host.appendChild(cell);
-  }
-  const have = SHOTS.filter((x) => x.angle !== null && cap.shots[x.key]).length;
-  $('buildBtn').disabled = have < 3;
-  $('capHint').textContent = have < 3
-    ? `${have} turns so far — three at least before it can carve.`
-    : have < 4 ? `${have} turns. The fourth quarter is the one that helps most.`
-      : have < 8 ? `${have} turns. Every eighth-turn you add rounds him off further.`
-        : 'All eight. That is as good as this gets.';
-}
-
-/** A little figure showing which way to stand — clearer than the words. */
-function turnIcon(angle) {
-  const c = document.createElement('canvas');
-  c.className = 'turn';
-  c.width = 90; c.height = 120;
-  const x = c.getContext('2d');
-  x.fillStyle = '#26314e';
-  const body = (cx, cy) => {
-    x.fillRect(cx - 9, cy - 34, 18, 18);        // head
-    x.fillRect(cx - 13, cy - 14, 26, 30);       // torso
-    x.fillRect(cx - 9, cy + 16, 7, 24);         // legs
-    x.fillRect(cx + 2, cy + 16, 7, 24);
-  };
-  body(45, 46);
-  if (angle === null) {
-    x.clearRect(0, 0, c.width, c.height);
-    x.strokeStyle = '#33405e';
-    x.lineWidth = 3;
-    x.strokeRect(14, 22, 62, 78);
-    return c;
-  }
-  // an arrow round the feet showing the quarter turn
-  x.strokeStyle = '#3d78d8';
-  x.lineWidth = 3;
-  x.beginPath();
-  x.ellipse(45, 100, 26, 9, 0, 0, Math.PI * 2);
-  x.stroke();
-  x.fillStyle = '#6ba0ff';
-  const a = (angle - 90) * Math.PI / 180;
-  x.beginPath();
-  x.arc(45 + Math.cos(a) * 26, 100 + Math.sin(a) * 9, 5, 0, Math.PI * 2);
-  x.fill();
-  return c;
-}
-
-function askFor(key) {
-  cap.wanted = key;
-  // a phone should open the camera; a desktop should open the file picker
-  const touch = matchMedia('(pointer: coarse)').matches;
-  $(touch ? 'capCam' : 'capIn').click();
-}
-
-async function tookShot(file) {
-  if (!cap.wanted || !file) return;
-  const key = cap.wanted;
-  cap.wanted = null;
-  try {
-    const img = await loadImage(file);
-    const photo = new Photo(img);
-    cap.shots[key] = { photo, thumb: thumbOf(photo, null) };
-    drawShots();
-    checkShot(key);
-    // the plate arriving changes how every other shot is read, so they all
-    // have to be looked at again
-    if (key === 'plate') for (const k of Object.keys(cap.shots)) if (k !== 'plate') checkShot(k);
-  } catch (e) {
-    say('capSay', e.message || 'could not read that', 'bad');
-  }
-}
+/**
+ * The capture, as a bag of photographs rather than a list of slots.
+ *
+ * Nine named slots was the wrong shape for a method that gets better with
+ * every extra view. Hand it twenty at once, in the order they were taken, and
+ * let `turns.js` work out what angle each one is: the sequence is the turn,
+ * the one with the most face in it is the front, and everything else follows.
+ */
+const cap = {
+  plate: null,
+  turns: [],        // { photo, sil, thumb, name }
+  angles: [],       // the same, with an angle on each
+  front: -1,        // -1 means "you work it out"
+  flip: undefined,
+  vol: null,
+  mesh: null,
+  wanted: null,
+};
 
 /**
  * A thumbnail with the outline the program FOUND drawn on it.
@@ -589,7 +516,7 @@ async function tookShot(file) {
  */
 function thumbOf(photo, sil) {
   const c = document.createElement('canvas');
-  c.width = 120; c.height = 160;
+  c.width = 108; c.height = 144;
   const cx = c.getContext('2d');
   cx.drawImage(photo.canvas, 0, 0, c.width, c.height);
   if (!sil) return c.toDataURL('image/png');
@@ -600,7 +527,6 @@ function thumbOf(photo, sil) {
       const sy = Math.min(sil.mh - 1, Math.round(y * sil.mh / c.height));
       if (sil.mask[sy * sil.mw + sx]) continue;
       const k = (y * c.width + x) * 4;
-      // everything the program calls "room", greyed and dimmed
       const g = (img.data[k] + img.data[k + 1] + img.data[k + 2]) / 3;
       img.data[k] = g * 0.30 + 10;
       img.data[k + 1] = g * 0.32 + 14;
@@ -611,34 +537,108 @@ function thumbOf(photo, sil) {
   return c.toDataURL('image/png');
 }
 
-/**
- * Look at the shot that was just taken and say if it is trouble.
- *
- * Cheap now, expensive later: a carve made from one bad outline is not
- * obviously wrong to look at, it is just a slightly odd person, and by then
- * nobody remembers which photograph was the bad one.
- */
-function checkShot(key) {
-  if (key === 'plate') {
-    say('capSay', 'the room is on file — now stand in it', 'good');
-    return;
+/** Work out every silhouette again — which the plate arriving changes. */
+function reread() {
+  const plate = cap.plate ? cap.plate.photo : null;
+  for (const t of cap.turns) {
+    t.sil = silhouette(t.photo, plate);
+    t.thumb = thumbOf(t.photo, t.sil);
   }
-  const plate = cap.shots.plate;
-  const sil = silhouette(cap.shots[key].photo, plate ? plate.photo : null);
-  cap.shots[key].sil = sil;
-  cap.shots[key].thumb = thumbOf(cap.shots[key].photo, sil);
+  cap.angles = assignAngles(cap.turns, { front: cap.front, flip: cap.flip });
   drawShots();
-  const frac = sil.h / cap.shots[key].photo.h;
-  if (sil.area < 0.015) {
-    say('capSay', 'cannot find you in that one — plainer background, or take the empty room first', 'bad');
-  } else if (frac > 0.97) {
-    say('capSay', 'you are running off the top or bottom — stand further back', 'bad');
-  } else if (frac < 0.45) {
-    say('capSay', 'you are rather small in frame — closer, or turn the phone upright', '');
-  } else if (!plate) {
-    say('capSay', 'usable — but the empty room would make it much better', '');
+}
+
+function drawShots() {
+  const prow = $('plateRow');
+  prow.textContent = '';
+  if (cap.plate) {
+    const cell = document.createElement('div');
+    cell.className = 'shot done';
+    const img = document.createElement('img');
+    img.src = cap.plate.thumb;
+    const who = document.createElement('div');
+    who.className = 'who';
+    who.textContent = 'the empty room';
+    const kill = document.createElement('button');
+    kill.className = 'kill';
+    kill.textContent = '×';
+    kill.onclick = () => { cap.plate = null; reread(); };
+    cell.append(img, who, kill);
+    prow.appendChild(cell);
+  }
+
+  const host = $('shots');
+  host.textContent = '';
+  cap.angles.forEach((t, i) => {
+    const cell = document.createElement('div');
+    cell.className = `shot done${t.front ? ' front' : ''}`;
+    const img = document.createElement('img');
+    img.src = t.thumb;
+    const deg = document.createElement('div');
+    deg.className = 'deg';
+    deg.textContent = t.front ? 'front' : `${Math.round(t.angle)}°`;
+    const kill = document.createElement('button');
+    kill.className = 'kill';
+    kill.textContent = '×';
+    kill.onclick = (e) => {
+      e.stopPropagation();
+      cap.turns.splice(i, 1);
+      if (cap.front >= cap.turns.length) cap.front = -1;
+      reread();
+    };
+    cell.append(img, deg, kill);
+    cell.title = `${t.name} — tap to make this the front`;
+    cell.onclick = () => { cap.front = i; reread(); };
+    host.appendChild(cell);
+  });
+
+  const n = cap.turns.length;
+  $('buildBtn').disabled = n < 3;
+  $('dirRow').hidden = n < 3;
+  $('flipBtn').textContent = cap.flip ? '⟲ the other way' : '⟳ as taken';
+  if (!n) {
+    say('capSay', '', '');
   } else {
-    say('capSay', 'good — the lit part of that thumbnail is what it found', 'good');
+    const chk = checkSet(cap.angles);
+    say('capSay', `${n} photograph${n === 1 ? '' : 's'}`
+      + (chk.notes.length ? ` — ${chk.notes.join('; ')}` : ', and they look usable'),
+    chk.notes.length ? '' : 'good');
+  }
+}
+
+/** Read a pile of files in, one after another, without locking the page up. */
+async function addTurns(files) {
+  const list = [...files].filter((f) => f.type.startsWith('image/'));
+  if (!list.length) return;
+  list.sort((a, b) => String(a.name).localeCompare(String(b.name), undefined, {
+    numeric: true, sensitivity: 'base',
+  }));
+  say('capSay', `reading ${list.length}…`);
+  for (const f of list) {
+    try {
+      const img = await loadImage(f);
+      // Smaller than a face photograph on purpose. The carve is seventy-odd
+      // cubes tall, so nothing here needs a thousand pixels — and twenty
+      // photographs at full size is a hundred and thirty megabytes of image
+      // data on a phone, which is where an app is killed rather than slowed.
+      cap.turns.push({ photo: new Photo(img, 680), name: f.name || `photo ${cap.turns.length + 1}` });
+    } catch { /* not an image this browser can read */ }
+    await new Promise((r) => setTimeout(r, 0));
+  }
+  cap.front = -1;
+  cap.flip = undefined;
+  reread();
+}
+
+async function setPlate(file) {
+  try {
+    const img = await loadImage(file);
+    const photo = new Photo(img, 680);
+    cap.plate = { photo, thumb: thumbOf(photo, null) };
+    reread();
+    say('capSay', 'the room is on file — every outline just got sharper', 'good');
+  } catch (e) {
+    say('capSay', e.message || 'could not read that', 'bad');
   }
 }
 
@@ -648,10 +648,24 @@ $('startCap').onclick = () => {
   $('built').hidden = true;
   drawShots();
 };
-$('capIn').onchange = (e) => { tookShot(e.target.files[0]); e.target.value = ''; };
-$('capCam').onchange = (e) => { tookShot(e.target.files[0]); e.target.value = ''; };
+$('plateBtn').onclick = () => $('plateIn').click();
+$('plateCam').onclick = () => $('plateCamIn').click();
+$('turnsBtn').onclick = () => $('turnsIn').click();
+$('turnsCam').onclick = () => $('turnsCamIn').click();
+$('plateIn').onchange = (e) => { if (e.target.files[0]) setPlate(e.target.files[0]); e.target.value = ''; };
+$('plateCamIn').onchange = (e) => { if (e.target.files[0]) setPlate(e.target.files[0]); e.target.value = ''; };
+$('turnsIn').onchange = (e) => { addTurns(e.target.files); e.target.value = ''; };
+$('turnsCamIn').onchange = (e) => { addTurns(e.target.files); e.target.value = ''; };
+$('flipBtn').onclick = () => {
+  cap.flip = !cap.flip;
+  reread();
+};
 $('capReset').onclick = () => {
-  cap.shots = {};
+  cap.plate = null;
+  cap.turns = [];
+  cap.angles = [];
+  cap.front = -1;
+  cap.flip = undefined;
   cap.vol = null;
   drawShots();
   say('capSay', '', '');
@@ -659,22 +673,14 @@ $('capReset').onclick = () => {
 $('againBtn').onclick = () => { $('built').hidden = true; $('capture').hidden = false; };
 
 $('buildBtn').onclick = () => {
-  const plate = cap.shots.plate ? cap.shots.plate.photo : null;
-  const views = [];
-  for (const spec of SHOTS) {
-    if (spec.angle === null) continue;
-    const got = cap.shots[spec.key];
-    if (!got) continue;
-    const sil = got.sil || silhouette(got.photo, plate);
-    got.sil = sil;
-    if (sil.area < 0.008) continue;
-    views.push({ photo: got.photo, sil, angle: spec.angle, name: spec.name.toLowerCase() });
-  }
+  const views = cap.angles
+    .filter((t) => t.sil && t.sil.area > 0.008)
+    .map((t) => ({ photo: t.photo, sil: t.sil, angle: t.angle, name: t.name }));
   if (views.length < 3) {
-    say('capSay', 'three usable turns at least — front, a side and the back', 'bad');
+    say('capSay', 'three usable photographs at least — a front, a side and a back', 'bad');
     return;
   }
-  say('capSay', 'carving…');
+  say('capSay', `carving from ${views.length}…`);
   const vol = carve(views, { ny: 76, nx: 44, nz: 44 });
   const rep = report(views, vol);
   cap.vol = vol;
@@ -684,9 +690,9 @@ $('buildBtn').onclick = () => {
   previewVolume($('volView'), vol, 20 * Math.PI / 180);
   const cubes = vol.count();
   say('builtSay', rep.notes.length
-    ? `${cubes} cubes — but: ${rep.notes.join('; ')}`
-    : `${cubes} cubes, from ${views.length} turns`,
-  rep.notes.length ? 'bad' : 'good');
+    ? `${cubes} cubes from ${views.length} photographs — but: ${rep.notes.join('; ')}`
+    : `${cubes} cubes, from ${views.length} photographs`,
+  rep.notes.length ? '' : 'good');
 };
 
 $('spinVol').oninput = (e) => {
@@ -1440,11 +1446,22 @@ Object.assign(window, {
     return !!wrap;
   },
   __cap: cap,
-  async __shot(key, url) {
-    cap.wanted = key;
-    await tookShot(url);
-    return Object.keys(cap.shots);
+  async __plate(url) {
+    await setPlate(url);
+    return !!cap.plate;
   },
+  async __turns(urls) {
+    for (const u of urls) {
+      const img = await loadImage(u);
+      cap.turns.push({ photo: new Photo(img, 680), name: String(u) });
+    }
+    cap.front = -1;
+    cap.flip = undefined;
+    reread();
+    return cap.angles.map((t) => Math.round(t.angle));
+  },
+  __front: (i) => { cap.front = i; reread(); return cap.angles.findIndex((t) => t.front); },
+  __flip: () => { cap.flip = !cap.flip; reread(); return !!cap.flip; },
   __build: () => { $('buildBtn').click(); return cap.vol ? cap.vol.count() : 0; },
   __toMc: () => { $('toMcBtn').click(); return true; },
   __png: () => S.skin.toDataURL(),

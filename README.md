@@ -67,11 +67,12 @@ it takes a second and it is the difference between a face and a smudge.
 
 **3D.** The other way in, and the more interesting one: **a handful of
 photographs and it works out your actual shape**. Not a face on a box — you, from every
-side. Prop the phone up, stand well back, and turn a little at a time. Four quarter
-turns is the least that works; **eight is much better**, because four
-outlines cannot tell a round shoulder from a boxy one and everything comes
-out with corners on it. The tab walks you through it and checks each shot as
-it arrives.
+side. Prop the phone up, stand well back, and turn a little at a time. Then give it
+**one photograph of the empty room and all the rest in one go** — four of
+them, or ten, or twenty; it works out which way round each one was on its
+own, from the order you took them and where the face is. Four quarter turns
+is the least that works and more is better, because four outlines cannot tell
+a round shoulder from a boxy one.
 
 It works by **shape from silhouette**. In each photograph it decides which
 pixels are you and which are room; then it takes a block of space where you

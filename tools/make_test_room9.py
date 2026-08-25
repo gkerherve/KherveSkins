@@ -96,61 +96,76 @@ def room(d: ImageDraw.ImageDraw) -> None:
         d.line([(0, gy), (W, gy)], fill=(212, 210, 204), width=2)
 
 
+# The figure as a RIGID SET OF SOLIDS, each one an upright elliptical column
+# at a fixed place in the room, rather than a set of rectangles drawn to look
+# right from each angle.
+#
+# This matters more than it sounds. A shape drawn per-angle is not the
+# projection of ANY three-dimensional object, and a visual hull is the
+# intersection of projections — so with four views the inconsistency hides in
+# the slack and with twenty it carves the legs clean off. That is exactly what
+# happened here, and for an hour it looked like the program had a bug in it.
+# A test figure that is not a real object cannot be used to test a method that
+# reconstructs real objects.
+#
+#   x    across the room, positive to the camera's right
+#   z    toward the camera
+#   rx/rz   the half-axes of the column's elliptical cross-section
+PARTS = [
+    # (x, z, rx, rz, y0, y1, colour)
+    (-20, 0, 19, 19, 0.56, 1.00, SKIN),        # right leg
+    (+20, 0, 19, 19, 0.56, 1.00, SKIN),        # left leg
+    (0, 0, 46, 30, 0.44, 0.62, SHORTS),
+    (0, 0, 46, 28, 0.20, 0.48, SHIRT),
+    (-57, 0, 13, 13, 0.21, 0.50, None),        # arms: sleeve then bare
+    (+57, 0, 13, 13, 0.21, 0.50, None),
+    (0, 0, 12, 12, 0.16, 0.21, SKIN),          # neck
+    (0, 0, 30, 27, 0.00, 0.17, None),          # head: hair then face
+]
+
+
 def figure(d: ImageDraw.ImageDraw, angle: int) -> None:
     """A boy standing with his arms DOWN, as people actually do."""
     cx = W // 2
     a = math.radians(angle)
-
-    def w(front: float, side: float) -> int:
-        return max(2, int(abs(front * math.cos(a)) + abs(side * math.sin(a))))
+    cos, sin = math.cos(a), math.sin(a)
 
     def band(t0: float, t1: float) -> tuple[int, int]:
         return CROWN + int(BODY_H * t0), CROWN + int(BODY_H * t1)
 
-    # legs
-    y0, y1 = band(0.56, 1.00)
-    legw = w(19, 19)
-    gap = int(11 * abs(math.cos(a)))
-    for sx in (-1, 1):
-        x = cx + sx * (gap + legw // 2)
-        d.rectangle([x - legw // 2, y0, x + legw // 2, y1], fill=SKIN)
+    def place(x, z, rx, rz):
+        """Where an upright column lands in the picture, and how wide."""
+        px = cx + x * cos - z * sin
+        half = max(2, math.hypot(rx * cos, rz * sin))
+        depth = x * sin + z * cos
+        return px, half, depth
 
-    # shorts
-    y0, y1 = band(0.44, 0.62)
-    sw = w(46, 30)
-    d.rectangle([cx - sw, y0, cx + sw, y1], fill=SHORTS)
-    if abs(math.cos(a)) > 0.3:
-        d.polygon([(cx - sw + 8, y1 - 6), (cx, y0 + 20), (cx + sw - 8, y1 - 6)],
-                  outline=(238, 238, 240), width=4)
-
-    # torso
-    y0, y1 = band(0.20, 0.48)
-    tw = w(46, 28)
-    d.rectangle([cx - tw, y0, cx + tw, y1], fill=SHIRT)
-
-    # ARMS DOWN, touching the body — no daylight at the ribs
-    aw = w(13, 13)
-    ay0, ay1 = band(0.21, 0.50)
-    for sx in (-1, 1):
-        x = cx + sx * (tw + aw - 2)
-        d.rectangle([x - aw, ay0, x + aw, ay0 + int(BODY_H * 0.13)], fill=SHIRT)
-        d.rectangle([x - aw, ay0 + int(BODY_H * 0.13), x + aw, ay1], fill=SKIN)
-
-    # neck and head
-    y0, y1 = band(0.16, 0.21)
-    nw = w(12, 12)
-    d.rectangle([cx - nw, y0, cx + nw, y1], fill=SKIN)
-    y0, y1 = band(0.00, 0.17)
-    hw = w(30, 27)
-    d.rectangle([cx - hw, y0 + 12, cx + hw, y1], fill=SKIN)
-    d.rectangle([cx - hw - 3, y0, cx + hw + 3, y0 + int((y1 - y0) * 0.40)], fill=HAIR)
-    facing = math.cos(a)
-    if facing > 0.4:
-        for ex in (-hw // 2, hw // 2):
-            d.rectangle([cx + ex - 6, y0 + 58, cx + ex + 6, y0 + 68], fill=(56, 50, 48))
-        d.rectangle([cx - 11, y0 + 96, cx + 11, y0 + 104], fill=(160, 104, 100))
-    elif facing < -0.4:
-        d.rectangle([cx - hw - 3, y0, cx + hw + 3, y0 + int((y1 - y0) * 0.80)], fill=HAIR)
+    # far things first, so a near arm covers the ribs behind it
+    order = sorted(PARTS, key=lambda p: -place(p[0], p[1], p[2], p[3])[2])
+    for (x, z, rx, rz, t0, t1, col) in order:
+        px, half, _ = place(x, z, rx, rz)
+        y0, y1 = band(t0, t1)
+        if col is not None:
+            d.rectangle([px - half, y0, px + half, y1], fill=col)
+            continue
+        if rx == 13:                                   # an arm: sleeve, then skin
+            cut = y0 + int(BODY_H * 0.13)
+            d.rectangle([px - half, y0, px + half, cut], fill=SHIRT)
+            d.rectangle([px - half, cut, px + half, y1], fill=SKIN)
+            continue
+        # the head: a face with hair over it, and more hair round the back
+        d.rectangle([px - half, y0 + 12, px + half, y1], fill=SKIN)
+        cap = 0.80 if cos < -0.4 else 0.40
+        d.rectangle([px - half - 3, y0, px + half + 3, y0 + int((y1 - y0) * cap)], fill=HAIR)
+        if cos > 0.4:
+            for ex in (-half / 2, half / 2):
+                d.rectangle([px + ex - 6, y0 + 58, px + ex + 6, y0 + 68], fill=(56, 50, 48))
+            d.rectangle([px - 11, y0 + 96, px + 11, y0 + 104], fill=(160, 104, 100))
+        elif abs(cos) <= 0.4:
+            # in profile the face is on the side he is turned toward, which is
+            # the only left-right clue a silhouette ever offers
+            nose = half * 0.55 * (1 if sin > 0 else -1)
+            d.rectangle([px + nose - 5, y0 + 58, px + nose + 5, y0 + 70], fill=(56, 50, 48))
 
 
 def shadows(img: Image.Image, angle: int) -> Image.Image:
@@ -193,10 +208,23 @@ def shot(angle, path: str) -> None:
 
 
 def main() -> None:
+    import sys
+    turns = 8
+    if "--turns" in sys.argv:
+        turns = int(sys.argv[sys.argv.index("--turns") + 1])
     os.makedirs(OUT, exist_ok=True)
     shot(None, os.path.join(OUT, "room-plate.png"))
+    # the canonical eight, which the regression checks are written against
     for a in (0, 45, 90, 135, 180, 225, 270, 315):
         shot(a, os.path.join(OUT, f"room-{a}.png"))
+    for i in range(turns):
+        a = round(i * 360 / turns)
+        # metering wanders shot to shot whether or not the table has an entry
+        if a not in EXPOSURE:
+            EXPOSURE[a] = (0.84 + 0.14 * ((i * 7) % 5) / 4,
+                           (1.00 + 0.03 * ((i * 3) % 3) / 2, 1.00, 0.98))
+        shot(a, os.path.join(OUT, f"many-{i:02d}-{a}.png"))
+    print(f"{turns} turns written as many-NN-DEG.png")
     print(f"crown y={CROWN} feet y={FEET} height={BODY_H}px  (arms DOWN, shadowed,")
     print("  and every shot metered differently, which is the point)")
 

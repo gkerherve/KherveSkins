@@ -178,6 +178,19 @@
   }
   .shot.done .who { align-self: flex-end; width: 100%; background: rgba(9,13,24,.72); }
   .shot .turn { position: absolute; inset: 0; z-index: 1; opacity: .5; }
+  .shot .deg {
+    position: absolute; top: 3px; left: 3px; z-index: 3; font-size: 10.5px;
+    background: rgba(9,13,24,.78); color: var(--ink); padding: 1px 5px; border-radius: 5px;
+  }
+  .shot.front { border-color: var(--blue-lit); box-shadow: 0 0 0 1px var(--blue-lit) inset; }
+  .shot.front .deg { background: var(--blue); color: #fff; }
+  .shot .kill {
+    position: absolute; top: 2px; right: 2px; z-index: 3; width: 20px; height: 20px;
+    line-height: 16px; padding: 0; font-size: 13px; border-radius: 5px;
+    background: rgba(9,13,24,.78); color: var(--ink-dim); border: 1px solid var(--line);
+  }
+  .shot .kill:hover { color: var(--bad); }
+  #plateRow { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 9px; }
 
   /* ---- the wardrobe, as a tree ----------------------------------------- */
   .branch { border-bottom: 1px solid var(--line); }
@@ -387,20 +400,46 @@
         </div>
 
         <div id="capture" hidden>
+          <h2>1 · The empty room</h2>
+          <div id="plateRow"></div>
+          <div class="btns">
+            <button id="plateBtn">Choose the empty room</button>
+            <button id="plateCam">Take it now</button>
+          </div>
+          <div class="hint">One photograph with nobody in it, from the spot the phone
+            will stay in. Optional — but it is worth more than all the others put
+            together, because then the program knows exactly what is room and what is
+            you, shadow included.</div>
+
+          <h2>2 · Every turn, all at once</h2>
+          <div class="btns">
+            <button id="turnsBtn" class="key">Add photos…</button>
+            <button id="turnsCam">Take one</button>
+          </div>
+          <div class="hint">Pick them all in one go, or drop them on the window.
+            <b>As many as you like</b> — twelve is plenty, twenty is better, and the
+            program works out which way round each one was.</div>
+          <input type="file" id="plateIn" accept="image/*" hidden>
+          <input type="file" id="plateCamIn" accept="image/*" capture="environment" hidden>
+          <input type="file" id="turnsIn" accept="image/*" multiple hidden>
+          <input type="file" id="turnsCamIn" accept="image/*" capture="environment" hidden>
+
           <div id="shots"></div>
           <div class="say" id="capSay"></div>
-          <input type="file" id="capIn" accept="image/*" hidden>
-          <input type="file" id="capCam" accept="image/*" capture="environment" hidden>
+
+          <div class="row" id="dirRow" hidden>
+            <label>which way you turned</label>
+            <button id="flipBtn" class="small">⟳ as taken</button>
+          </div>
+          <div class="hint" id="capHint">Tap a photograph to say <b>that one is the
+            front</b>. The lit part of each is what the program found — if it has
+            eaten your head, or taken in your shadow or half the wall, that is the
+            shot to retake.</div>
+
           <div class="btns">
             <button id="buildBtn" class="key">Build the 3D</button>
             <button id="capReset">Start over</button>
           </div>
-          <div class="hint" id="capHint">Fill in at least the front, a side and the
-            back. Every turn after that rounds him off further.</div>
-          <div class="hint"><b>The lit part of each thumbnail is what the program
-            found.</b> If the greyed-out part has eaten your head, or the lit part
-            takes in your shadow or half the wall, that shot is the problem — retake
-            it rather than wondering why the carve came out odd.</div>
         </div>
 
         <div id="built" hidden>

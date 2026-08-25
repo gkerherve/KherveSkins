@@ -106,13 +106,23 @@ export function landmarks(vol) {
   // wide from shoulder to wrist — arm, chest, arm — so "how many runs across
   // the whole slice" answers three long before it answers two, and puts the
   // hips up in the ribs.
-  let hip = top + Math.round(H * 0.55);
+  //
+  // Scanned from the floor UPWARD for where the fork closes — and only after
+  // a fork has been seen at all. Standing with the feet together there is
+  // never one, and a loop that breaks at the first single run then reports
+  // the hips at the ankles: a man who is all torso. Feet together is what
+  // people do, so that case takes the proportion instead and says so.
+  let hip = top + Math.round(H * 0.52);
+  let sawFork = false;
   for (let y = floor - 1; y > top + Math.round(H * 0.35); y--) {
-    if (trunkRuns(vol, y, tl, tr) < 2) { hip = y + 1; break; }
+    const runs = trunkRuns(vol, y, tl, tr);
+    if (runs >= 2) { sawFork = true; continue; }
+    if (sawFork) { hip = y + 1; break; }
   }
+  const fusedLegs = !sawFork;
 
   return {
-    top, floor, neck, shoulder, hip, height: H, fusedArms,
+    top, floor, neck, shoulder, hip, height: H, fusedArms, fusedLegs,
     widthAt, leftAt, rightAt, countAt,
     torso: [tl, tr],
     armL: [tr + 1, Math.max(tr + 1, ...rightAt.slice(shoulder, hip))],
