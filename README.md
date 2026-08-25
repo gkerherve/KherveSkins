@@ -68,6 +68,8 @@ of the photograph — brightness, contrast, colour, warmth, sharpness. Also
 of what was sampled. Every colour it uses was found in your photograph; what
 the slider changes is how much it commits to them.
 
+![the wardrobe](docs/wardrobe.png)
+
 **Wear.** The wardrobe, laid out the way Minecraft's own is: a list of
 categories — Hair, Tops, Bottoms, Outerwear, Headwear, Gloves, Footwear, Face
 Items, Back Items — and a grid of things inside each one, each drawn on a
