@@ -1,30 +1,40 @@
 // The photograph, made into a man.
 //
-// This is the whole trick, and it is worth saying what the difficulty is: a
-// Minecraft face is EIGHT PIXELS ACROSS. Squeeze a photograph into that with
-// an ordinary resize and you get a smear of skin tone with two grey smudges
-// in it, which is why most photo-to-skin tools look like nothing in
-// particular. Three things stop that here:
+// This is the whole trick, and it is worth saying what the difficulty is: at
+// the only size vanilla Minecraft accepts, a face is EIGHT PIXELS ACROSS.
+// Squeeze a photograph into that with an ordinary resize and you get a smear
+// of skin tone with two grey smudges in it, which is why most photo-to-skin
+// tools look like nothing in particular. Four things stop it:
 //
-//   the warp    — the eye line and the mouth line are pinned to whole texel
-//                 rows before anything is averaged, so features land ON a
-//                 pixel rather than across the join between two
+//   the warp    — the eye line, the mouth line and both eyes are pinned to
+//                 whole texels before anything is averaged, so features land
+//                 ON a pixel rather than across the join between two
 //   the detail  — local contrast is pushed back up after the shrink, because
 //                 averaging is exactly the operation that removes it
 //   the nudge   — the darkest texel in the eye row IS an eye, and is treated
 //                 as one; a face that reads at eight pixels is a drawing of
 //                 a face, not a photograph of one
+//   the wall    — a head box is a rectangle and a head is not, so what was
+//                 behind the person is found and painted out before it can
+//                 leak down the side of his head
+//
+// And a fifth, which is not a trick at all: MORE PIXELS. At 128 the face is
+// sixteen across and at 256 it is thirty-two, and the first three matter
+// less at every step because the photograph starts carrying the likeness by
+// itself. Everything here is written in sixty-fourths and multiplied by `s`,
+// so the same code draws all three.
 //
 // Everything the photograph cannot answer — the back of the head, the soles
 // of the shoes — is built from colours it CAN answer, so the man is all one
 // person from every side.
 
-import { parts } from './layout.js';
+import { parts, BASE, scaleOf } from './layout.js';
 import { clamp, clamp255, mix, shade, luma, dist, rng, hexToRgb } from './pixels.js';
 import { sampleFace, probe } from './photo.js';
 
 export const DEFAULTS = {
   slim: false,
+  size: BASE,
   // the frame
   eyeRow: 4.5,
   mouthRow: 6.5,
@@ -33,10 +43,10 @@ export const DEFAULTS = {
   shiftY: 0,
   // the tone of the photograph
   bright: 0,
-  contrast: 0.20,
-  satur: 0.28,
+  contrast: 0.12,
+  satur: 0.16,
   warmth: 0,
-  detail: 0.55,
+  detail: 0.45,
   levels: 0,
   // the drawing on top of it
   features: 0.60,
@@ -71,8 +81,8 @@ function tone(c, o) {
   }
   if (o.satur) {
     const l = 0.2126 * r + 0.7152 * g + 0.0722 * b;
-    const s = 1 + o.satur;
-    r = l + (r - l) * s; g = l + (g - l) * s; b = l + (b - l) * s;
+    const sat = 1 + o.satur;
+    r = l + (r - l) * sat; g = l + (g - l) * sat; b = l + (b - l) * sat;
   }
   return [clamp255(r), clamp255(g), clamp255(b), 255];
 }
@@ -87,9 +97,9 @@ function posterize(c, levels) {
 /**
  * Put back the local contrast the shrink took out.
  *
- * An unsharp mask over the eight-by-eight itself rather than over the
- * photograph: it is the SMALL picture that has gone soft, and sharpening the
- * big one first just makes the averaging throw away sharper pixels.
+ * An unsharp mask over the face grid itself rather than over the photograph:
+ * it is the SMALL picture that has gone soft, and sharpening the big one
+ * first just makes the averaging throw away sharper pixels.
  */
 function crisp(grid, cols, rows, amount) {
   if (!amount) return grid;
@@ -131,37 +141,38 @@ function crisp(grid, cols, rows, amount) {
  *
  * The head box is a rectangle and a head is not, so its corners are whatever
  * was behind the person — and at eight pixels across, four corners is a
- * QUARTER of the face. Left alone it shows up as pale blue chips at the jaw,
- * and worse, it leaks: the sides of the head are built from the front's edge
+ * QUARTER of the face. Left alone it shows up as pale chips at the jaw, and
+ * worse, it leaks: the sides of the head are built from the front's edge
  * column and the top from its first row, so one bad corner turns into a
  * stripe down the ear and a patch on the crown.
  *
- * It is found the way a person would find it — flood in from the edge of the
+ * Found the way a person would find it — flood in from the edge of the
  * frame, because background is the stuff that TOUCHES the outside — and
  * filled from whatever neighbours it, which is hair at the top of the head
  * and jaw at the bottom, without either being named anywhere.
+ *
+ * The test is COMPARATIVE, and that is the part that took two goes to get
+ * right. "Far from the complexion" fails on a pale kitchen wall, which is
+ * nearer to a pale forehead than a shadowed cheek is. "Nearer to the wall we
+ * measured than to his face" is the question actually being asked.
  */
 function dropBackground(grid, cols, rows, bg, pal) {
   if (!bg) return grid;
-  // Two ways of being background, because one is never enough: it matches
-  // what was measured behind the head, OR it is a long way from both the
-  // complexion and the hair — which is what a bright window or a shadowed
-  // corner of the same wall looks like. Either way it only counts if it is
-  // connected to the edge of the box, and that is what keeps an eye white,
-  // which fails both tests, from being scrubbed out.
-  const near = (c) => (
-    dist(c, pal.skin) > 78
-    && (dist(c, bg) < 130 || (dist(c, pal.skin) > 130 && dist(c, pal.hair) > 130))
-  );
+  const near = (c) => {
+    const db = dist(c, bg);
+    if (db > 150) return false;
+    return db * 1.15 < dist(c, pal.skin) && db * 1.15 < dist(c, pal.hair);
+  };
+  const inset = Math.max(2, Math.round(cols * 0.25));
   const mark = new Uint8Array(cols * rows);
   const stack = [];
   const push = (u, v) => {
     if (u < 0 || v < 0 || u >= cols || v >= rows) return;
     // The middle of a head box is a FACE. Whatever else has gone wrong, the
-    // four texels the eyes and nose live in are not the wall behind him —
-    // and without this rule they can be, because a grey-green eye against a
-    // grey wall is a closer colour match than an eye is to a cheek.
-    if (u >= 2 && u <= cols - 3 && v >= 2 && v <= rows - 3) return;
+    // texels the eyes and nose live in are not the wall behind him — and
+    // without this rule they can be, because a grey-green eye against a grey
+    // wall is a closer colour match than an eye is to a cheek.
+    if (u >= inset && u < cols - inset && v >= inset && v < rows - inset) return;
     const i = v * cols + u;
     if (mark[i] || !near(grid[i])) return;
     mark[i] = 1;
@@ -180,7 +191,7 @@ function dropBackground(grid, cols, rows, bg, pal) {
   // of wall, and quietly repainting the whole face would hide it
   if (!n || n > cols * rows * 0.55) return grid;
 
-  for (let pass = 0; pass < 6; pass++) {
+  for (let pass = 0; pass < cols; pass++) {
     let moved = 0;
     for (let v = 0; v < rows; v++) {
       for (let u = 0; u < cols; u++) {
@@ -220,8 +231,6 @@ function hairness(grid, cols, rows, hair, skinTone) {
   for (let i = 0; i < grid.length; i++) {
     const dh = dist(grid[i], hair) + 1;
     const ds = dist(grid[i], skinTone) + 1;
-    // a texel darker than both is hair rather than shadowed skin: hair is
-    // what is dark at the top of a head
     out[i] = clamp(ds / (ds + dh), 0, 1);
   }
   return out;
@@ -234,54 +243,71 @@ function hairness(grid, cols, rows, hair, skinTone) {
  * colour used is one that was found in that row of it. What it does is
  * decide that the darkest texel in the eye row is an EYE, and stop it being
  * a slightly darker beige.
+ *
+ * It works in eighths and paints blocks, so it means the same thing at every
+ * size — and it eases OFF as the size goes up. At thirty-two pixels across,
+ * the photograph has the eyes already; drawing over them with a flat lozenge
+ * would be putting a cartoon on top of a portrait.
  */
-function emphasize(grid, cols, rows, o, pal) {
-  const f = o.features;
+function emphasize(grid, cols, rows, o, pal, s) {
+  // Straight division, not something gentler: at thirty-two pixels a drawn
+  // lip is a flat pink rectangle four texels deep, and the photograph
+  // underneath it was better. The nudge is for when there is nothing there
+  // to nudge.
+  const f = o.features / s;
   if (!f) return grid;
-  const at = (u, v) => grid[v * cols + u];
-  const put = (u, v, c, t) => {
-    if (u < 0 || v < 0 || u >= cols || v >= rows) return;
-    grid[v * cols + u] = mix(at(u, v), c, t);
+  const at = (u, v) => grid[clamp(v, 0, rows - 1) * cols + clamp(u, 0, cols - 1)];
+  // one "cell" is one eighth of the face, whatever the size
+  const put = (cu, cv, c, t, wide = 1, tall = 1) => {
+    for (let j = 0; j < Math.round(tall * s); j++) {
+      for (let i = 0; i < Math.round(wide * s); i++) {
+        const u = Math.round(cu * s) + i, v = Math.round(cv * s) + j;
+        if (u < 0 || v < 0 || u >= cols || v >= rows) continue;
+        grid[v * cols + u] = mix(grid[v * cols + u], c, t);
+      }
+    }
   };
-  const eyeR = clamp(Math.floor(o.eyeRow), 1, rows - 2);
-  const mouthR = clamp(Math.floor(o.mouthRow), eyeR + 1, rows - 1);
+  const eyeC = clamp(Math.floor(o.eyeRow), 1, 6);
+  const mouthC = clamp(Math.floor(o.mouthRow), eyeC + 1, 7);
+  const midRow = Math.round((eyeC + 0.5) * s);
 
   // --- the eyes ----------------------------------------------------------
-  const darkestIn = (v, a, b) => {
+  const darkestCell = (a, b) => {
     let best = a, bl = Infinity;
-    for (let u = a; u <= b; u++) {
-      const l = luma(at(u, v));
-      if (l < bl) { bl = l; best = u; }
+    for (let cu = a; cu <= b; cu++) {
+      let sum = 0, n = 0;
+      for (let i = 0; i < s; i++) {
+        const c = at(Math.round(cu * s) + i, midRow);
+        sum += luma(c); n++;
+      }
+      const l = sum / n;
+      if (l < bl) { bl = l; best = cu; }
     }
     return best;
   };
-  const half = cols / 2;
-  const lu = darkestIn(eyeR, 1, Math.max(1, Math.floor(half) - 1));
-  const ru = darkestIn(eyeR, Math.min(cols - 2, Math.ceil(half)), cols - 2);
-  // an iris is the darkest thing on that row, pushed further
-  const iris = shade(mix(at(lu, eyeR), at(ru, eyeR), 0.5), 0.62);
+  const lu = darkestCell(1, 3);
+  const ru = darkestCell(4, 6);
+  const iris = shade(mix(at(Math.round(lu * s), midRow), at(Math.round(ru * s), midRow), 0.5), 0.62);
   const white = mix(pal.skin, [246, 244, 240], 0.72);
-  for (const [u, dir] of [[lu, -1], [ru, 1]]) {
-    put(u, eyeR, iris, f);
-    put(u + dir, eyeR, white, f * 0.55);
-    // a lid line above sells an eye more than the eye does
-    put(u, eyeR - 1, shade(pal.hair, 0.85), f * 0.35);
+  for (const [cu, dir] of [[lu, -1], [ru, 1]]) {
+    put(cu, eyeC, iris, f);
+    put(cu + dir, eyeC, white, f * 0.55);
+    put(cu, eyeC - 1, shade(pal.hair, 0.85), f * 0.35);   // a lid line above
   }
 
   // --- the mouth ---------------------------------------------------------
-  const mid = Math.floor(half);
-  const mouthDark = shade(at(darkestIn(mouthR, mid - 2, mid + 1), mouthR), 0.82);
+  const mid = 4;
+  const mouthDark = shade(at(Math.round(mid * s), Math.round((mouthC + 0.5) * s)), 0.82);
   const lip = [clamp255(mouthDark[0] * 1.06), mouthDark[1], mouthDark[2]];
-  put(mid - 1, mouthR, lip, f * 0.85);
-  put(mid, mouthR, lip, f * 0.85);
-  put(mid - 2, mouthR, lip, f * 0.35);
-  put(mid + 1, mouthR, lip, f * 0.35);
+  put(mid - 1, mouthC, lip, f * 0.85, 2);
+  put(mid - 2, mouthC, lip, f * 0.35);
+  put(mid + 1, mouthC, lip, f * 0.35);
 
   // --- the nose ----------------------------------------------------------
-  const noseR = Math.min(mouthR - 1, eyeR + 1);
-  if (noseR > eyeR) {
-    put(mid - 1, noseR, shade(pal.skin, 0.86), f * 0.35);
-    put(mid, noseR, shade(pal.skin, 0.90), f * 0.20);
+  const noseC = Math.min(mouthC - 1, eyeC + 1);
+  if (noseC > eyeC) {
+    put(mid - 1, noseC, shade(pal.skin, 0.86), f * 0.35);
+    put(mid, noseC, shade(pal.skin, 0.90), f * 0.20);
   }
   return grid;
 }
@@ -289,7 +315,7 @@ function emphasize(grid, cols, rows, o, pal) {
 /**
  * Build the whole man.
  *
- * @param {Skin}  skin   the 64x64 written into
+ * @param {Skin}  skin   the image written into
  * @param {Photo} photo  the picture
  * @param {object} f     the frame: head box, eye line, mouth line, tilt
  * @param {object} opts  everything the sliders say
@@ -297,6 +323,9 @@ function emphasize(grid, cols, rows, o, pal) {
  */
 export function generate(skin, photo, f, opts) {
   const o = { ...DEFAULTS, ...opts };
+  const size = skin.size || o.size || BASE;
+  const s = scaleOf(size);
+  const N = Math.round(8 * s);          // the face, in texels across
   const found = probe(photo, f);
   // Where each colour came FROM, kept apart from the colour itself. The card
   // says so, because "it guessed your trousers" is worth knowing and "it read
@@ -320,7 +349,7 @@ export function generate(skin, photo, f, opts) {
   };
 
   // --- the face ----------------------------------------------------------
-  let grid = sampleFace(photo, f, 8, 8, o);
+  let grid = sampleFace(photo, f, N, N, o);
   grid = grid.map((c) => tone(c, o));
   // the palette follows the picture through the same tone controls, or the
   // clothes end up from a different photograph than the face
@@ -329,55 +358,50 @@ export function generate(skin, photo, f, opts) {
     if (src[k] === 'photo') pal[k] = pt(pal[k]);
   }
   const bgToned = found.bg ? tone(found.bg, o) : null;
-  grid = dropBackground(grid, 8, 8, bgToned, pal);
-  grid = crisp(grid, 8, 8, o.detail * 1.4);
-  grid = emphasize(grid, 8, 8, o, pal);
+  grid = dropBackground(grid, N, N, bgToned, pal);
+  grid = crisp(grid, N, N, o.detail * 1.4);
+  grid = emphasize(grid, N, N, o, pal, s);
   if (o.levels) grid = grid.map((c) => posterize(c, o.levels));
 
-  const hairMap = hairness(grid, 8, 8, pal.hair, pal.skin);
+  const hairMap = hairness(grid, N, N, pal.hair, pal.skin);
   const noise = rng(o.seed);
   const grain = (c, k = 1) => {
     if (!o.grain) return c;
     const n = (noise() - 0.5) * o.grain * 26 * k;
     return [clamp255(c[0] + n), clamp255(c[1] + n), clamp255(c[2] + n), 255];
   };
-  const lit = (c, face) => {
-    const k = 1 + (LIGHT[face] - 1) * o.shading * 1.6;
-    return shade(c, k);
-  };
+  const lit = (c, face) => shade(c, 1 + (LIGHT[face] - 1) * o.shading * 1.6);
 
   const P = {};
-  for (const p of parts(o.slim)) P[p.key] = p;
+  for (const p of parts(o.slim, size)) P[p.key] = p;
   const head = P.head;
 
   // front of the head: the photograph, and the only part of him that is
-  skin.mapRect(head.rects.front, (u, v) => grain(grid[v * 8 + u], 0.5));
+  skin.mapRect(head.rects.front, (u, v) => grain(grid[v * N + u], 0.5));
 
   // --- the rest of the head ----------------------------------------------
   //
   // A photograph of a face is a photograph of a face. Everything round the
   // back is BUILT, from the two colours the front established, and its only
   // job is to be the same person seen from behind.
-  const edge = (u, v) => grid[v * 8 + u];
-  const hairAt = (v) => {
-    // how much of that row, at the sides, is hair
-    return Math.max(hairMap[v * 8], hairMap[v * 8 + 7]);
-  };
+  const edge = (u, v) => grid[v * N + u];
+  const hairAt = (v) => Math.max(hairMap[v * N], hairMap[v * N + N - 1]);
   const hairShade = (t) => shade(pal.hair, 1 - t * 0.16);
+  const last = N - 1;
 
   // top: hair, darkening toward the crown at the back
   skin.mapRect(head.rects.top, (u, v) => {
     // image-up on a top face is the BACK of the head; the front row of it
     // carries on from the fringe the photograph actually shows
-    const toBack = 1 - v / 7;
+    const toBack = 1 - v / last;
     const fringe = mix(edge(u, 0), pal.hair, 0.35);
     return grain(lit(mix(fringe, hairShade(toBack), toBack * 0.85), 'top'), 0.6);
   });
 
   // sides: the face's own edge at the front, hair behind it, an ear between
   const side = (isRight) => (u, v) => {
-    const t = isRight ? (7 - u) / 7 : u / 7;   // 0 at the front, 1 at the back
-    const front = edge(isRight ? 0 : 7, v);
+    const t = isRight ? (last - u) / last : u / last;   // 0 at the front, 1 at the back
+    const front = edge(isRight ? 0 : last, v);
     const isHair = hairAt(v);
     let c;
     if (isHair > 0.55) {
@@ -387,8 +411,9 @@ export function generate(skin, photo, f, opts) {
       c = mix(cheek, hairShade(t), clamp((t - 0.42) * 2.2, 0, 1));
     }
     // an ear: a small darker shell where an ear is, and never in the hair
-    if (o.ears && isHair < 0.55 && v >= 3 && v <= 5 && t > 0.34 && t < 0.66) {
-      const rim = v === 4 && t > 0.44 && t < 0.58;
+    const eighth = v / N * 8;
+    if (o.ears && isHair < 0.55 && eighth >= 3 && eighth < 6 && t > 0.34 && t < 0.66) {
+      const rim = eighth >= 4 && eighth < 5 && t > 0.44 && t < 0.58;
       c = mix(c, shade(pal.skin, rim ? 0.74 : 0.90), 0.8);
     }
     return grain(lit(c, isRight ? 'right' : 'left'), 0.5);
@@ -401,14 +426,14 @@ export function generate(skin, photo, f, opts) {
     const isHair = hairAt(v);
     const napeSkin = mix(pal.skin, [0, 0, 0], 0.10);
     const c = isHair > 0.5
-      ? hairShade(0.75 + (u === 0 || u === 7 ? 0.1 : 0))
+      ? hairShade(0.75 + (u === 0 || u === last ? 0.1 : 0))
       : mix(napeSkin, hairShade(0.8), 0.35);
     return grain(lit(c, 'back'), 0.6);
   });
 
   // bottom: under the jaw, and the neck in the middle of it
-  skin.mapRect(head.rects.bottom, (u, v) => {
-    const neck = u >= 2 && u <= 5 && v >= 2 && v <= 5;
+  skin.mapRect(head.rects.bottom, (u, v, _c, w, h) => {
+    const neck = u >= w * 0.25 && u < w * 0.75 && v >= h * 0.25 && v < h * 0.75;
     const c = neck ? shade(pal.skin, 0.86) : shade(pal.skin, 0.70);
     return grain(lit(c, 'bottom'), 0.4);
   });
@@ -419,19 +444,19 @@ export function generate(skin, photo, f, opts) {
   // was read correctly and looks like a bald man wearing a doily when it was
   // not. What it buys is depth — hair that stands a pixel proud of the skull.
   if (o.hairLayer) {
-    liftHair(skin, head, hairMap, pal, lit, grain);
+    liftHair(skin, head, hairMap, pal, lit, grain, N);
   } else {
     for (const face of ['top', 'bottom', 'right', 'front', 'left', 'back']) {
       skin.fillRect(head.overRects[face], [0, 0, 0, 0]);
     }
   }
 
-  dress(skin, P, pal, o, { lit, grain });
+  dress(skin, P, pal, o, { lit, grain }, s);
   return pal;
 }
 
 /** Move the hair off the skull and onto the hat layer, a pixel proud of it. */
-function liftHair(skin, head, hairMap, pal, lit, grain) {
+function liftHair(skin, head, hairMap, pal, lit, grain, N) {
   const scalp = mix(pal.skin, [0, 0, 0], 0.12);
   for (const face of ['top', 'bottom', 'right', 'front', 'left', 'back']) {
     const src = head.rects[face], dst = head.overRects[face];
@@ -439,7 +464,7 @@ function liftHair(skin, head, hairMap, pal, lit, grain) {
       for (let u = 0; u < src[2]; u++) {
         const c = skin.get(src[0] + u, src[1] + v);
         const isHair = face === 'front'
-          ? hairMap[v * 8 + u] > 0.55
+          ? hairMap[v * N + u] > 0.55
           : dist(c, pal.hair) < dist(c, pal.skin);
         if (isHair && face !== 'bottom') {
           skin.set(dst[0] + u, dst[1] + v, c);
@@ -458,22 +483,22 @@ function liftHair(skin, head, hairMap, pal, lit, grain) {
  * Flat colour on a body is the tell of a generated skin, so nothing here is
  * flat: every panel has light coming from above, a seam where two pieces of
  * cloth meet, a hem that is darker than what it hangs off, and a grain. A
- * collar, cuffs and a sole are four texels each and they are the difference
+ * collar, cuffs and a sole are a few texels each and they are the difference
  * between a man in a shirt and a man painted blue.
+ *
+ * Written in sixty-fourths and multiplied, so a cuff is one line at 64 and
+ * four at 256 rather than a hairline nobody can see.
  */
-function dress(skin, P, pal, o, ink) {
+function dress(skin, P, pal, o, ink, s) {
   const { lit, grain } = ink;
-  const shirt = pal.shirt;
-  const trousers = pal.trousers;
-  const shoes = pal.shoes;
+  const { shirt, trousers, shoes } = pal;
   const hands = pal.skin;
+  const line = Math.max(1, Math.round(s));
 
   const cloth = (base, face) => (u, v, _c, w, h) => {
-    // light falls from the shoulder down
-    const drop = 1 - (v / h) * 0.14;
+    const drop = 1 - (v / h) * 0.14;             // light falls from the shoulder
     let c = shade(base, drop);
-    // the sides of a torso curve away
-    if (face === 'front' || face === 'back') {
+    if (face === 'front' || face === 'back') {   // and a torso curves away
       const roll = Math.abs((u + 0.5) / w - 0.5) * 2;
       c = shade(c, 1 - roll * roll * 0.10);
     }
@@ -486,36 +511,37 @@ function dress(skin, P, pal, o, ink) {
     skin.mapRect(body.rects[face], cloth(shirt, face));
   }
   // the neck hole, in the top of the shirt
-  skin.mapRect(body.rects.top, (u, v, c) => (
-    u >= 2 && u <= 5 && v >= 1 && v <= 2 ? shade(hands, 0.88) : c
+  skin.mapRect(body.rects.top, (u, v, c, w, h) => (
+    u >= w * 0.25 && u < w * 0.75 && v >= h * 0.25 && v < h * 0.75 ? shade(hands, 0.88) : c
   ));
   // a collar, and a hem at the waist
-  const band = (rect, row, k) => skin.mapRect(rect, (u, v, c) => (v === row ? shade(c, k) : c));
+  const band = (rect, from, to, k) => skin.mapRect(rect, (u, v, c, w, h) => (
+    v >= (from < 0 ? h + from : from) && v < (to <= 0 ? h + to : to) ? shade(c, k) : c
+  ));
   for (const face of ['front', 'back', 'right', 'left']) {
-    band(body.rects[face], 0, 1.08);
-    band(body.rects[face], 11, 0.86);
+    band(body.rects[face], 0, line, 1.08);
+    band(body.rects[face], -line, 0, 0.86);
   }
   // a collar opening at the throat
-  skin.mapRect(body.rects.front, (u, v, c) => (
-    v === 0 && u >= 3 && u <= 4 ? shade(hands, 0.9) : c
+  skin.mapRect(body.rects.front, (u, v, c, w) => (
+    v < line && u >= w * 0.375 && u < w * 0.625 ? shade(hands, 0.9) : c
   ));
 
   // --- the arms ----------------------------------------------------------
   for (const key of ['armR', 'armL']) {
     const arm = P[key];
-    const sleeve = clamp(Math.round(o.sleeve), 0, 12);
+    const sleeve = Math.round(clamp(o.sleeve, 0, 12) * s);
     for (const face of ['front', 'back', 'right', 'left', 'top', 'bottom']) {
       const isEnd = face === 'bottom';
       const isTop = face === 'top';
       skin.mapRect(arm.rects[face], (u, v, c, w, h) => {
-        if (isEnd) return grain(lit(sleeve >= 12 ? shirt : hands, face), 0.6);
+        if (isEnd) return grain(lit(sleeve >= h ? shirt : hands, face), 0.6);
         if (isTop) return grain(lit(sleeve > 0 ? shade(shirt, 1.04) : hands, face), 0.6);
         const inSleeve = v < sleeve;
-        const base = inSleeve ? shirt : hands;
-        let col = cloth(base, face)(u, v, c, w, h);
-        if (v === sleeve - 1) col = shade(col, 0.88);          // the cuff
-        if (!inSleeve && v === sleeve) col = shade(col, 1.05);  // the wrist
-        if (!inSleeve && v >= 10) col = shade(col, 0.93);       // fingers
+        let col = cloth(inSleeve ? shirt : hands, face)(u, v, c, w, h);
+        if (v >= sleeve - line && v < sleeve) col = shade(col, 0.88);        // the cuff
+        if (!inSleeve && v < sleeve + line) col = shade(col, 1.05);          // the wrist
+        if (!inSleeve && v >= h - line * 2) col = shade(col, 0.93);          // fingers
         return col;
       });
     }
@@ -524,20 +550,19 @@ function dress(skin, P, pal, o, ink) {
   // --- the legs ----------------------------------------------------------
   for (const key of ['legR', 'legL']) {
     const leg = P[key];
-    const boot = clamp(Math.round(o.boot), 0, 12);
-    const hem = 12 - boot;
+    const boot = Math.round(clamp(o.boot, 0, 12) * s);
     for (const face of ['front', 'back', 'right', 'left', 'top', 'bottom']) {
       const isSole = face === 'bottom';
       const isHip = face === 'top';
       skin.mapRect(leg.rects[face], (u, v, c, w, h) => {
         if (isSole) return grain(lit(shade(shoes, 0.72), face), 0.5);
         if (isHip) return grain(lit(shade(trousers, 1.02), face), 0.6);
+        const hem = h - boot;
         const inBoot = v >= hem;
-        const base = inBoot ? shoes : trousers;
-        let col = cloth(base, face)(u, v, c, w, h);
-        if (v === hem) col = shade(col, 1.08);                 // the shoe's rim
-        if (v === hem - 1) col = shade(col, 0.86);             // the turn-up
-        if (inBoot && v === 11) col = shade(col, 0.80);        // the welt
+        let col = cloth(inBoot ? shoes : trousers, face)(u, v, c, w, h);
+        if (v >= hem && v < hem + line) col = shade(col, 1.08);              // the shoe's rim
+        if (v >= hem - line && v < hem) col = shade(col, 0.86);              // the turn-up
+        if (inBoot && v >= h - line) col = shade(col, 0.80);                 // the welt
         return col;
       });
     }
@@ -555,20 +580,24 @@ function dress(skin, P, pal, o, ink) {
 /**
  * A skin with nobody's photograph in it.
  *
- * The starting point when the app is opened cold, and what "clear" goes back
- * to: a plain figure in the chosen colours, so the painter always has
+ * The starting point when the app is opened cold, and what "start again" goes
+ * back to: a plain figure in the chosen colours, so the painter always has
  * something to paint on and the preview is never an empty box.
  */
 export function blank(skin, opts = {}) {
   const o = { ...DEFAULTS, ...opts };
+  const size = skin.size || o.size || BASE;
+  const s = scaleOf(size);
+  const N = Math.round(8 * s);
+  const colours = o.colours || {};
   const pal = {
-    hair: hexToRgb(o.colours.hair || '#40342a'),
-    skin: hexToRgb(o.colours.skin || '#e0ac7e'),
-    shirt: hexToRgb(o.colours.shirt || '#3b6ea5'),
-    trousers: hexToRgb(o.colours.trousers || '#33405e'),
-    shoes: hexToRgb(o.colours.shoes || '#2b2521'),
+    hair: hexToRgb(colours.hair || '#40342a'),
+    skin: hexToRgb(colours.skin || '#e0ac7e'),
+    shirt: hexToRgb(colours.shirt || '#3b6ea5'),
+    trousers: hexToRgb(colours.trousers || '#33405e'),
+    shoes: hexToRgb(colours.shoes || '#2b2521'),
     src: Object.fromEntries(['hair', 'skin', 'shirt', 'trousers', 'shoes']
-      .map((k) => [k, o.colours[k] ? 'yours' : 'made'])),
+      .map((k) => [k, colours[k] ? 'yours' : 'made'])),
   };
   const noise = rng(o.seed);
   const grain = (c, k = 1) => {
@@ -578,22 +607,25 @@ export function blank(skin, opts = {}) {
   };
   const lit = (c, face) => shade(c, 1 + (LIGHT[face] - 1) * o.shading * 1.6);
   const P = {};
-  for (const p of parts(o.slim)) P[p.key] = p;
+  for (const p of parts(o.slim, size)) P[p.key] = p;
   const head = P.head;
-  const hairRow = (v) => v <= 2;
+  const cell = (v) => v / N * 8;
   for (const face of ['front', 'back', 'right', 'left', 'top', 'bottom']) {
     skin.mapRect(head.rects[face], (u, v) => {
       if (face === 'top') return grain(lit(pal.hair, face), 0.6);
       if (face === 'bottom') return grain(lit(shade(pal.skin, 0.78), face), 0.4);
-      const hair = face === 'back' ? v <= 5 : hairRow(v);
+      const hair = face === 'back' ? cell(v) < 6 : cell(v) < 3;
       let c = hair ? pal.hair : pal.skin;
-      if (face === 'front' && v === 4 && (u === 2 || u === 5)) c = [56, 48, 44];
-      if (face === 'front' && v === 4 && (u === 1 || u === 6)) c = [238, 236, 232];
-      if (face === 'front' && v === 6 && u >= 3 && u <= 4) c = shade(pal.skin, 0.72);
+      if (face === 'front') {
+        const cu = cell(u), cv = cell(v);
+        if (cv >= 4 && cv < 5 && ((cu >= 2 && cu < 3) || (cu >= 5 && cu < 6))) c = [56, 48, 44];
+        if (cv >= 4 && cv < 5 && ((cu >= 1 && cu < 2) || (cu >= 6 && cu < 7))) c = [238, 236, 232];
+        if (cv >= 6 && cv < 7 && cu >= 3 && cu < 5) c = shade(pal.skin, 0.72);
+      }
       return grain(lit(c, face), 0.5);
     });
     skin.fillRect(head.overRects[face], [0, 0, 0, 0]);
   }
-  dress(skin, P, pal, o, { lit, grain });
+  dress(skin, P, pal, o, { lit, grain }, s);
   return pal;
 }

@@ -76,6 +76,58 @@ def main() -> None:
     path = os.path.join(OUT, "test-face.png")
     img.save(path)
     print(f"{path}  head={HEAD} eyes={EYE_Y} mouth={MOUTH_Y}")
+    room()
+
+
+# The hard one.
+#
+# A PALE room and a PALE top, which is the case that caught the first version
+# out: the background remover was asking "is this far from his complexion",
+# and a white kitchen wall is nearer to a pale forehead than a shadowed cheek
+# is. So the wall survived, and since the top of the head is built from the
+# face's first row, it turned the crown white. Same head, same measurements —
+# only what is behind it and what he is wearing have changed.
+ROOM_SHIRT = (232, 226, 214)
+ROOM_HAIR = (108, 78, 54)
+
+
+def room() -> None:
+    img = Image.new("RGB", (W, H), (236, 238, 240))
+    d = ImageDraw.Draw(img)
+    for x in range(W):
+        k = 0.86 + 0.14 * (1 - abs(x - W * 0.3) / W)
+        d.line([(x, 0), (x, H)], fill=(int(240 * k), int(241 * k), int(238 * k)))
+    # a doorway and a worktop, so the wall is not one flat colour anywhere
+    d.rectangle([40, 60, 190, 700], fill=(214, 216, 219))
+    d.rectangle([470, 300, W, 360], fill=(198, 196, 190))
+    d.rectangle([470, 360, W, 700], fill=(224, 222, 216))
+
+    d.ellipse([60, 560, W - 60, H + 220], fill=ROOM_SHIRT)
+    d.rectangle([250, 430, 390, 590], fill=SKIN_DARK)
+    d.ellipse(HEAD, fill=SKIN)
+    d.ellipse([HEAD[0] + 120, HEAD[1] + 40, HEAD[2] + 10, HEAD[3]], fill=SKIN_DARK)
+    d.ellipse([HEAD[0] + 6, HEAD[1] + 10, HEAD[2] - 30, HEAD[3] - 20], fill=SKIN)
+    d.pieslice([HEAD[0] - 18, HEAD[1] - 10, HEAD[2] + 18, HEAD[1] + 250],
+               start=180, end=360, fill=ROOM_HAIR)
+    d.rectangle([HEAD[0] - 18, HEAD[1] + 100, HEAD[0] + 30, HEAD[1] + 260], fill=ROOM_HAIR)
+    d.rectangle([HEAD[2] - 30, HEAD[1] + 100, HEAD[2] + 18, HEAD[1] + 260], fill=ROOM_HAIR)
+    # a fringe, which is what pushes the eyes down the head
+    d.rectangle([HEAD[0] + 20, HEAD[1] + 100, HEAD[2] - 20, HEAD[1] + 138], fill=ROOM_HAIR)
+
+    d.rectangle([258, EYE_Y - 30, 300, EYE_Y - 22], fill=(84, 62, 44))
+    d.rectangle([340, EYE_Y - 30, 382, EYE_Y - 22], fill=(84, 62, 44))
+    for cx in (279, 361):
+        d.ellipse([cx - 24, EYE_Y - 12, cx + 24, EYE_Y + 12], fill=(244, 242, 238))
+        d.ellipse([cx - 11, EYE_Y - 11, cx + 11, EYE_Y + 11], fill=(96, 118, 132))
+        d.ellipse([cx - 4, EYE_Y - 4, cx + 4, EYE_Y + 4], fill=(28, 24, 22))
+    d.polygon([(320, EYE_Y + 24), (308, MOUTH_Y - 28), (332, MOUTH_Y - 28)], fill=SKIN_DARK)
+    d.ellipse([292, MOUTH_Y - 12, 348, MOUTH_Y + 12], fill=(196, 138, 132))
+    d.line([(292, MOUTH_Y), (348, MOUTH_Y)], fill=(140, 88, 84), width=3)
+
+    img = img.filter(ImageFilter.GaussianBlur(1.6))
+    path = os.path.join(OUT, "test-room.png")
+    img.save(path)
+    print(f"{path}  the pale-wall, pale-shirt case")
 
 
 if __name__ == "__main__":

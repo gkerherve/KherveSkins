@@ -105,12 +105,22 @@ export const near = (a, b, tol) => (
 /**
  * Skin, as a rule about colour rather than a model of a person.
  *
- * The chroma test is the standard one and it has a hole in it big enough to
- * lose a face through: **dark brown hair sits in exactly the same corner of
- * the colour space as skin**. Chroma cannot tell them apart, because in
- * chroma they are not different — only in brightness. So there is a floor
- * under the value as well, and it is what stops a fringe being read as a
- * forehead and the whole head being swallowed by the box.
+ * The chroma test is the standard one and it has two holes in it, both big
+ * enough to lose a face through, and both found by looking at what came out
+ * rather than by reading about it:
+ *
+ *   **dark brown hair** sits in exactly the same corner of the colour space
+ *   as skin. Chroma cannot tell them apart, because in chroma they are not
+ *   different — only in brightness. Hence the floor under the value, and it
+ *   is what stops a fringe being read as a forehead and the whole head being
+ *   swallowed by the box.
+ *
+ *   **a cream shirt** clears the standard test by a whisker, and a portrait
+ *   is mostly shirt. Merged into the face, it drags the box down to the
+ *   waist and there is nothing left of the head. What separates them is not
+ *   brightness — a pale complexion is as bright — but the SPREAD between red
+ *   and green: skin has forty or fifty points of it at any complexion, and
+ *   undyed cloth has six.
  */
 export function skinish(r, g, b) {
   const y = 0.299 * r + 0.587 * g + 0.114 * b;
@@ -119,8 +129,8 @@ export function skinish(r, g, b) {
   return y > 56 && y < 250
     && Math.max(r, g, b) > 78
     && cb > 76 && cb < 130
-    && cr > 132 && cr < 178
-    && r > g && r > b * 0.9;
+    && cr > 134 && cr < 178
+    && r - g > 12 && r > b * 0.9;
 }
 
 /**
@@ -226,9 +236,15 @@ async function detectorFace(photo) {
   }
 }
 
-/** No detector: find the biggest patch of skin and reason outward from it. */
-export function heuristicFace(photo) {
-  const gw = 96;
+/**
+ * The skin mask, and the biggest run of it.
+ *
+ * A coarse grid on purpose: fine enough that an eye is several cells across,
+ * coarse enough that the whole search is a few thousand cells and runs while
+ * a finger is still on the Choose button.
+ */
+function maskGrid(photo) {
+  const gw = 120;
   const gh = Math.max(1, Math.round(gw * photo.h / photo.w));
   const sx = photo.w / gw, sy = photo.h / gh;
   const mask = new Uint8Array(gw * gh);
@@ -238,21 +254,20 @@ export function heuristicFace(photo) {
       mask[j * gw + i] = skinish(c[0], c[1], c[2]) ? 1 : 0;
     }
   }
-  // largest run of connected skin — a face beats a hand, usually
   const seen = new Int32Array(gw * gh).fill(-1);
   const blobs = [];
   const stack = [];
   for (let s = 0; s < mask.length; s++) {
     if (!mask[s] || seen[s] >= 0) continue;
     const id = blobs.length;
-    let n = 0, x0 = gw, y0 = gh, x1 = 0, y1 = 0;
+    let n = 0, x0 = gw, y0 = gh, x1 = 0, y1 = 0, sxs = 0, sys = 0;
     stack.length = 0;
     stack.push(s);
     seen[s] = id;
     while (stack.length) {
       const p = stack.pop();
       const px = p % gw, py = (p / gw) | 0;
-      n++;
+      n++; sxs += px; sys += py;
       if (px < x0) x0 = px; if (px > x1) x1 = px;
       if (py < y0) y0 = py; if (py > y1) y1 = py;
       const ns = [p - 1, p + 1, p - gw, p + gw];
@@ -264,21 +279,164 @@ export function heuristicFace(photo) {
         stack.push(q);
       }
     }
-    blobs.push({ n, x0, y0, x1, y1 });
+    blobs.push({ id, n, x0, y0, x1, y1, cy: sys / n, cx: sxs / n });
   }
   // prefer a big blob that is high in the picture and not absurdly wide
-  let best = null, bestScore = -1;
+  let blob = null, bestScore = -1;
   for (const b of blobs) {
     const w = b.x1 - b.x0 + 1, h = b.y1 - b.y0 + 1;
-    if (w < 4 || h < 4) continue;
+    if (w < 5 || h < 5) continue;
     const aspect = h / w;
-    const score = b.n * (aspect > 0.7 && aspect < 2.4 ? 1 : 0.35)
-      * (1.3 - (b.y0 + b.y1) / 2 / gh * 0.6);
-    if (score > bestScore) { bestScore = score; best = b; }
+    const score = b.n * (aspect > 0.7 && aspect < 2.6 ? 1 : 0.35)
+      * (1.3 - b.cy / gh * 0.6);
+    if (score > bestScore) { bestScore = score; blob = b; }
   }
+  return { gw, gh, sx, sy, mask, seen, blob };
+}
+
+/**
+ * The eyes, found as HOLES.
+ *
+ * This is the one that made the finder work, and it came from looking at
+ * what the skin mask actually contained rather than from any theory about
+ * faces. **The whites of eyes are never skin-coloured** — they are neutral,
+ * and the test wants forty points of red over green — and nor is an iris. So
+ * on any face, of any complexion, in any light, the two eyes are two small
+ * holes punched in an otherwise solid run of skin.
+ *
+ * Holes are cheap to find (flood the not-skin cells inward from the edge of
+ * the blob's box; what the flood cannot reach is enclosed) and a pair of
+ * them at the same height, the right distance apart, is a face looking at
+ * the camera.
+ *
+ * And once the eyes are known, the rest of the head follows from proportions
+ * that hold across people: the distance between the pupils is about a third
+ * of the width of a head and a quarter of its height, and the eye line sits
+ * halfway down it. Measured against a drawn portrait whose true measurements
+ * were known, this lands within three pixels on every number — where reading
+ * the head off the edges of the skin blob was out by a hundred and fifty.
+ */
+function eyeHoles(g) {
+  const { gw, gh, seen, blob } = g;
+  if (!blob) return null;
+  const { x0, y0, x1, y1, id } = blob;
+  const bw = x1 - x0 + 1, bh = y1 - y0 + 1;
+  const idx = (i, j) => j * gw + i;
+  const gap = (i, j) => seen[idx(i, j)] !== id;
+
+  // what the flood CAN reach from the rim of the box is outside the head
+  const out = new Uint8Array(gw * gh);
+  const stack = [];
+  const seed = (i, j) => {
+    if (i < x0 || i > x1 || j < y0 || j > y1) return;
+    const k = idx(i, j);
+    if (out[k] || !gap(i, j)) return;
+    out[k] = 1;
+    stack.push(k);
+  };
+  for (let j = y0; j <= y1; j++) { seed(x0, j); seed(x1, j); }
+  for (let i = x0; i <= x1; i++) { seed(i, y0); seed(i, y1); }
+  while (stack.length) {
+    const k = stack.pop();
+    const i = k % gw, j = (k / gw) | 0;
+    seed(i + 1, j); seed(i - 1, j); seed(i, j + 1); seed(i, j - 1);
+  }
+
+  // everything else inside the box that is not skin is a hole in the face
+  const done = new Uint8Array(gw * gh);
+  const holes = [];
+  for (let j = y0; j <= y1; j++) {
+    for (let i = x0; i <= x1; i++) {
+      const k = idx(i, j);
+      if (!gap(i, j) || out[k] || done[k]) continue;
+      done[k] = 1;
+      stack.length = 0;
+      stack.push(k);
+      let n = 0, sxs = 0, sys = 0;
+      while (stack.length) {
+        const q = stack.pop();
+        const qi = q % gw, qj = (q / gw) | 0;
+        n++; sxs += qi; sys += qj;
+        for (const [di, dj] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+          const a = qi + di, b = qj + dj;
+          if (a < x0 || a > x1 || b < y0 || b > y1) continue;
+          const r = idx(a, b);
+          if (!gap(a, b) || out[r] || done[r]) continue;
+          done[r] = 1;
+          stack.push(r);
+        }
+      }
+      holes.push({ n, cx: sxs / n, cy: sys / n });
+    }
+  }
+
+  // a pair at the same height, the right distance apart, in the upper part
+  const up = holes.filter((h) => h.n >= 2 && h.cy < y0 + bh * 0.72);
+  let pair = null, pairScore = -1;
+  for (let i = 0; i < up.length; i++) {
+    for (let j = i + 1; j < up.length; j++) {
+      let a = up[i], b = up[j];
+      if (a.cx > b.cx) [a, b] = [b, a];
+      const dx = b.cx - a.cx;
+      const dy = Math.abs(b.cy - a.cy);
+      if (dy > bh * 0.10) continue;
+      if (dx < bw * 0.18 || dx > bw * 0.80) continue;
+      // two of a kind: eyes are the same size as each other
+      const score = a.n + b.n - Math.abs(a.n - b.n);
+      if (score > pairScore) { pairScore = score; pair = [a, b]; }
+    }
+  }
+  return pair;
+}
+
+/** No detector: find the biggest patch of skin and reason outward from it. */
+export function heuristicFace(photo) {
+  const g = maskGrid(photo);
+  const pair = eyeHoles(g);
+  if (pair) return fromEyes(photo, g, pair);
+  return fromBlob(photo, g);
+}
+
+/** The head, worked out from where the two eyes are. */
+function fromEyes(photo, g, [a, b]) {
+  const { sx, sy } = g;
+  const eyeL = (a.cx + 0.5) * sx;
+  const eyeR = (b.cx + 0.5) * sx;
+  const eye = ((a.cy + b.cy) / 2 + 0.5) * sy;
+  const ipd = Math.max(4, eyeR - eyeL);
+  const w = ipd * 2.90;
+  const h = ipd * 4.25;
+  const box = { x: (eyeL + eyeR) / 2 - w / 2, y: eye - h * 0.515, w, h };
+  // the proportion puts the mouth about here; the picture says exactly where
+  const guessed = eye + ipd * 1.10;
+  const found = darkestRow(photo, { ...box, y: guessed - ipd * 0.45, h: ipd * 0.9 },
+    0, 1, 0.34, 0.66);
+  const mouth = found === null ? guessed : found;
+  const tilt = Math.atan2((b.cy - a.cy) * sy, Math.max(1, eyeR - eyeL));
+  return frame(box, eye, Math.max(eye + h * 0.08, mouth), tilt, eyeL, eyeR);
+}
+
+/**
+ * The old way, kept for the faces the new way cannot see.
+ *
+ * Closed eyes, sunglasses, a head turned away, a photograph too small for an
+ * eye to be more than one cell: no pair of holes, no proportions. Reading
+ * the head off the edges of the skin is much worse, but it is never nothing,
+ * and there is a box on screen to drag.
+ */
+function fromBlob(photo, g) {
+  const { gw, gh, sx, sy, seen, blob } = g;
   let skinBox;
-  if (best) {
-    skinBox = faceOfBlob(seen, blobs.indexOf(best), gw, gh, sx, sy);
+  if (blob) {
+    // brown hair is brown skin as far as any colour rule is concerned, so
+    // ask this head where its own light and dark halves divide
+    const split = splitByBrightness(photo, seen, blob.id, gw, gh, sx, sy);
+    if (split) {
+      for (let i = 0; i < seen.length; i++) {
+        if (seen[i] === blob.id && split.lum[i] < split.cut) seen[i] = -1;
+      }
+    }
+    skinBox = faceOfBlob(seen, blob.id, gw, gh, sx, sy);
   } else {
     // nothing found: a square in the upper middle, which is where a portrait
     // puts a head whether the mask agreed or not
@@ -297,16 +455,64 @@ export function heuristicFace(photo) {
   };
   // a ratio is a guess about a haircut; the picture knows
   const box = growToHair(photo, guess, skinBox);
-  // The bands matter more than they look. Brows are darker than eyes and sit
-  // barely a twentieth of a head above them, so a search that starts too high
-  // finds a brow every time and puts the whole face one row out. Measured
-  // from the top of the HAIR, eyes land near the middle of a head and brows
-  // do not — which is the entire reason the box is grown to the hair first.
+  // Brows are darker than eyes and sit barely a twentieth of a head above
+  // them, so a search that starts too high finds a brow every time and puts
+  // the whole face one row out.
   const eye = darkestRow(photo, box, 0.46, 0.66) ?? box.y + box.h * 0.54;
   const mouth = darkestRow(photo, box, 0.70, 0.92) ?? box.y + box.h * 0.78;
   const tilt = eyeTilt(photo, box, eye);
   const [eyeL, eyeR] = eyeColumns(photo, box, eye);
   return frame(box, eye, Math.max(eye + box.h * 0.08, mouth), tilt, eyeL, eyeR);
+}
+
+/**
+ * Split hair off skin when the two are the same COLOUR.
+ *
+ * There is no colour rule that separates mid-brown hair from mid-brown skin,
+ * because there is no difference: put a swatch of each side by side and they
+ * are the same paint. Every fixed threshold that excludes one excludes
+ * somebody's complexion — a floor high enough to drop brown hair drops a
+ * deep complexion with it, and now the tool works on some people and not on
+ * others, which is the worst failure available here.
+ *
+ * So the threshold is not fixed. Otsu's method asks the RUN OF PIXELS THIS
+ * PERSON is made of where its own natural split is, and only splits when
+ * there genuinely are two groups: hair and skin on one head are far apart in
+ * brightness whoever the head belongs to, and a bald head or one whose hair
+ * matches the skin has one group and is left alone.
+ */
+function splitByBrightness(photo, seen, id, gw, gh, sx, sy) {
+  const hist = new Float64Array(64);
+  let total = 0;
+  const lumaAt = (i) => {
+    const c = photo.at(((i % gw) + 0.5) * sx, (((i / gw) | 0) + 0.5) * sy);
+    return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+  };
+  const lum = new Float32Array(seen.length);
+  for (let i = 0; i < seen.length; i++) {
+    if (seen[i] !== id) continue;
+    const l = lumaAt(i);
+    lum[i] = l;
+    hist[Math.min(63, Math.max(0, Math.floor(l / 4)))]++;
+    total++;
+  }
+  if (total < 30) return null;
+  let sum = 0;
+  for (let k = 0; k < 64; k++) sum += k * hist[k];
+  let sumB = 0, wB = 0, best = -1, cut = 0, mLo = 0, mHi = 0;
+  for (let k = 0; k < 64; k++) {
+    wB += hist[k];
+    if (!wB) continue;
+    const wF = total - wB;
+    if (!wF) break;
+    sumB += k * hist[k];
+    const mB = sumB / wB, mF = (sum - sumB) / wF;
+    const between = wB * wF * (mB - mF) * (mB - mF);
+    if (between > best) { best = between; cut = k; mLo = mB; mHi = mF; }
+  }
+  // one group, not two: leave it be
+  if ((mHi - mLo) * 4 < 42) return null;
+  return { cut: (cut + 1) * 4, lum };
 }
 
 /**
@@ -384,29 +590,47 @@ function growToHair(photo, guess, skinBox) {
   // wall. Stepping back one keeps the box on the hair rather than around it,
   // and a box a hair's breadth too small is worth much more than one too
   // large — background inside the box costs a whole texel of face.
-  const grow = (from, dir, strip) => {
+  // It either found the wall or it did not, and the difference matters. A
+  // busy background — a doorway, a worktop, a room — never reads as one flat
+  // colour, so the search runs to its limit and the "edge of the hair" it
+  // reports is just where it gave up. That is worse than the ratio it was
+  // meant to improve on, so a side that runs out falls back to the ratio.
+  const grow = (from, dir, limit, strip) => {
     let at = from;
-    for (let i = 0; i < 18; i++) {
+    for (let i = 0; i < 60; i++) {
       const next = at + dir * step;
-      if (next < -step || next > Math.max(photo.w, photo.h) + step) break;
-      if (flat(...strip(next))) return at - dir * step * (i ? 1 : 0);
+      if (Math.abs(next - from) > limit) return { at: from, found: false };
+      if (next < -step || next > Math.max(photo.w, photo.h) + step) {
+        return { at: from, found: false };
+      }
+      if (flat(...strip(next))) return { at: at - dir * step * (i ? 1 : 0), found: true };
       at = next;
     }
-    return at;
+    return { at: from, found: false };
   };
 
-  const top = grow(skinBox.y, -1, (y) => [skinBox.x + skinBox.w * 0.22, y, skinBox.w * 0.56, step]);
-  const left = grow(skinBox.x, -1, (x) => [x, skinBox.y, step, skinBox.h * 0.7]);
-  const right = grow(skinBox.x + skinBox.w, +1, (x) => [x, skinBox.y, step, skinBox.h * 0.7]);
+  const sideLimit = guess.w * 0.45;
+  const topLimit = guess.h * 0.55;
+  const top = grow(skinBox.y, -1, topLimit,
+    (y) => [skinBox.x + skinBox.w * 0.22, y, skinBox.w * 0.56, step]);
+  const left = grow(skinBox.x, -1, sideLimit,
+    (x) => [x, skinBox.y, step, skinBox.h * 0.7]);
+  const right = grow(skinBox.x + skinBox.w, +1, sideLimit,
+    (x) => [x, skinBox.y, step, skinBox.h * 0.7]);
+
+  const gx0 = guess.x, gx1 = guess.x + guess.w;
+  const x0 = left.found ? left.at : gx0;
+  const x1 = right.found ? right.at : gx1;
+  const y0 = top.found ? top.at : guess.y;
   const grown = {
-    x: left,
-    y: top,
-    w: right - left,
-    h: skinBox.y + skinBox.h - top + skinBox.h * 0.04,
+    x: x0,
+    y: y0,
+    w: x1 - x0,
+    h: skinBox.y + skinBox.h - y0 + skinBox.h * 0.04,
   };
   // it only counts if it stopped somewhere sensible
-  const sane = grown.w > guess.w * 0.7 && grown.w < guess.w * 1.7
-    && grown.h > guess.h * 0.7 && grown.h < guess.h * 1.7;
+  const sane = grown.w > guess.w * 0.78 && grown.w < guess.w * 1.38
+    && grown.h > guess.h * 0.78 && grown.h < guess.h * 1.38;
   return sane ? grown : guess;
 }
 

@@ -1,0 +1,205 @@
+# KherveSkins — working notes for Claude
+
+## Do what was asked, without asking to
+
+Everything asked for gets built in the session it is asked for. Standing
+authorisation, every time.
+
+- "Put it in the queue" means *do it this session*. A queue is an order of
+  work, not a holding pen.
+- **Do not stop to confirm.** Where a request could be read two ways, pick the
+  reading a reasonable person meant, say which one in a sentence, and build
+  it. A question that pauses the work costs more than a wrong guess, which is
+  cheap to change once it exists and can be looked at.
+- Never report something as done that is not. If part of a request was not
+  built, say exactly which part and why, in the chat, without being asked.
+- Big items go FIRST. A cheap fix that arrives while a large build is
+  unfinished waits its turn.
+
+## Always commit and push
+
+At the end of every chat, commit the work. Group it into coherent commits —
+one per feature or fix, `feat:` / `fix:` / `chore:` and a lowercase summary
+that says what changed for the person using it. Work goes straight onto
+`main`; no branches or PRs unless asked. Never commit `shots/`.
+
+## What this is
+
+A browser tool that turns a photograph into a Minecraft skin — the 64×64 PNG,
+plus a live figure wearing it and an editor for both. **ES modules, Three.js
+from a CDN, no build step and no npm.** Edit a file in `js/` and reload.
+Python is only the dev server.
+
+It has to work on **Windows and on Android from the same files**, which is
+most of why it is a web app and all of why every control is pointer-events
+and thumb-sized.
+
+## Size
+
+**Everything is written in sixty-fourths and multiplied.** `scaleOf(size)` is
+the multiplier; 64, 128 and 256 are the sizes; nothing downstream hard-codes
+64. The model's shape — where an arm hangs, how big a head is — stays in
+sixty-fourths whatever the size, because he is the same man however finely he
+is painted. Only the rectangles scale.
+
+64 is the only size vanilla Java takes and is the default. The others are the
+HD sizes, and they matter more than any of the cleverness below: at 256 a
+face is thirty-two pixels across and the photograph carries the likeness by
+itself. Two consequences worth remembering:
+
+- **The texture is rebuilt with the figure**, not reused. A canvas that
+  changes size under a Three texture does not reliably reach the card again;
+  the geometry gets its new UVs, the picture stays the old one, and a 256
+  skin renders as the same eight blocks it had at 64. That cost an hour.
+- **The painter cannot draw texel by texel.** At 256 the dead-zone pass was
+  sixty-five thousand canvas calls a redraw. The dead zones and the chequer
+  are both stamped from cached images now, and the region lookup is a table
+  (`regionMap`) rather than seventy-two rectangle comparisons per texel.
+
+## The rule everything is built on
+
+**At the size Minecraft actually takes, a face is eight pixels across.**
+
+That one number decides the architecture. A photograph resized to 8×8 is a
+beige smear with two grey dots in it — that is what a naïve version of this
+program produces, and it is why most photo-to-skin tools look like nothing in
+particular. Four things stop it, and none of them is optional:
+
+1. **The warp** (`sampleFace`, `js/photo.js`). The eye line, the mouth line
+   and both eye *columns* are pinned to whole texel centres before anything
+   is averaged. An eye landing on the boundary between two texels is two
+   half-eyes and reads as neither. This is the single highest-value thing in
+   the codebase; the eye columns were added after a render showed a face with
+   one eye and it was measured, not guessed.
+2. **The detail pass** (`crisp`, `js/generate.js`). Averaging is precisely the
+   operation that removes local contrast, so it is put back afterwards — on
+   the 8×8, not on the photograph, because it is the small picture that has
+   gone soft. It **must not overshoot**: clamped to the range of the
+   neighbourhood, or the one dark texel beside a lit cheek becomes pure black
+   and a black square on a face reads as a hole in the man.
+3. **The nudge** (`emphasize`). The darkest texel in the eye row IS an eye,
+   and is treated as one. Every colour it uses was found in that row of the
+   photograph — it does not invent features, it commits to them.
+4. **The de-background** (`dropBackground`). A head box is a rectangle and a
+   head is not, so its corners are the wall. Found by flooding in from the
+   EDGE — background is the stuff that touches the outside — and never
+   allowed into the middle 4×4, because a grey-green eye against a grey wall
+   is a closer colour match than an eye is to a cheek. It leaks if you skip
+   it: the sides of the head are built from the front's edge column and the
+   top from its first row, so one bad corner becomes a stripe down the ear.
+
+## Finding the face
+
+Two hard-won things, both found by looking at output rather than by reading
+about faces:
+
+**The eyes are HOLES.** The whites of eyes are never skin-coloured — the test
+wants forty points of red over green and a sclera is neutral — so on any face
+the two eyes are small enclosed gaps in an otherwise solid run of skin. Flood
+the not-skin cells inward from the rim of the blob's box; what the flood
+cannot reach is a hole; a pair of them at the same height and the right
+distance apart is a face. Then the head follows from proportions that hold
+across people (pupil distance ≈ 1/2.9 of head width, ≈ 1/4.25 of head
+height, eye line halfway down). Within four pixels on every number, against a
+reading off the skin's own edges that was out by a hundred and fifty.
+
+**The colour rule has two holes in it** and both were found the same way.
+Dark brown hair is the same colour as skin in chroma and differs only in
+brightness — hence the value floor, and hence `splitByBrightness`, which asks
+THIS head where its own light and dark halves divide (Otsu) rather than
+imposing a threshold that would exclude somebody's complexion. A cream shirt
+clears the standard chroma test by a whisker, and a portrait is mostly shirt
+— hence `r - g > 12`, because skin has forty or fifty points of red over
+green at any complexion and undyed cloth has six.
+
+`fromBlob` is the old path, kept for closed eyes, sunglasses and heads turned
+away. It is much worse and it is never nothing.
+
+## The other load-bearing agreement
+
+**The figure faces −Z, and his right hand is at +X.** `layout.js` and
+`model.js` both depend on it. Get it backwards and everything still renders,
+inside out, with his parting on the wrong side — the kind of wrong that
+survives a dozen screenshots because nobody can say why it looks odd.
+
+Two consequences in `setBoxUV` (`js/model.js`), both verified against renders
+rather than reasoned about:
+
+- The four upright faces take their rectangle as you would read it.
+- The top and bottom are turned through **half a circle**, because Three
+  unwraps a box as though it faced +Z. On the top face, image-up is the BACK
+  of the head; on the bottom face, image-up is the FRONT. They are not the
+  same, and that is correct.
+- Neighbouring boxes overlap by **half a percent** (`WELD`). Minecraft's
+  parts touch exactly, which is invisible against an opaque world and a
+  hairline crack down the middle of him in the listing shot, which has no
+  background at all.
+- Every rectangle is inset by **a twentieth of a texel** (`BLEED`). Without
+  it the far edge of a face samples exactly on the boundary and
+  nearest-neighbour rounds INTO THE NEXT RECTANGLE — a dashed grey hem along
+  one edge of a limb, invisible until you photograph the model against a
+  colour that is not the page.
+
+## Painting must outlive the generator
+
+Every slider re-runs `generate()` over the whole 64×64. A face somebody spent
+five minutes fixing must not be wiped out because they nudged the contrast
+afterwards. `S.edits` in `js/app.js` is that promise: a map of every texel
+laid by hand, replayed after every rebuild. The painter reports writes
+through `onWrite`, and its undo snapshots the map alongside the pixels — undo
+that restored the image but not the record would put the paint straight back
+on the next slider move.
+
+Anything new that writes to the skin by hand has to go through the painter,
+or it will not survive.
+
+## Verifying a change
+
+`window` carries the test hooks. Drive those and read the picture rather than
+asking anybody to look:
+
+| hook | what it does |
+| --- | --- |
+| `__load(url)` | load a photograph and build from it |
+| `__state()` | frame, options, palette, how many texels were painted |
+| `__render(yaw, pitch, dist)` | draw ONE frame on demand |
+| `__fit()` | re-size the canvases — a headless browser fires no animation frames, so the ResizeObserver never runs and the canvas stays 1px wide |
+| `__texel(x, y)` | read the image |
+| `__size(n)` | change the resolution, or ask what it is |
+| `__paint(x, y, hex)` | lay one texel exactly as a click would |
+| `capture(name)` | POST the render to `shots/NAME.png` |
+| `captureSkin(name)` | POST the 64×64 itself |
+| `__gfx` | the renderer, scene and camera, for a camera the orbit cannot reach |
+
+`python tools/make_test_face.py` draws two portraits with their head box, eye
+line and mouth line PRINTED, so a check can compare what the finder said with
+where they actually are. They are rulers, not photographs.
+
+- `shots/test-face.png` — the plain one.
+- `shots/test-room.png` — **the hard one**: a pale room and a pale top, which
+  is the case that caught two versions out. A white wall is nearer to a pale
+  forehead than a shadowed cheek is, and a cream shirt reads as skin.
+
+Both should land within four pixels on the box and on the nose for the eye
+line, the mouth line and both eye columns. If one of them drifts, that is a
+regression however good the render looks.
+
+**Read the texels before believing a screenshot.** A dump of the 8×8 face
+settles in one call what a dozen camera angles argue about. And a render
+against a colour that is not the page background is the only way to see a
+hole in the model.
+
+Serve on a port of your own (`python serve.py --port 8150`) rather than one
+somebody is using.
+
+## What is not built
+
+- **No second figure to compare against.** Judging a skin means judging it
+  next to another one, and there is nowhere to put a reference.
+- **Nothing knows about capes, or Bedrock's extra geometry.** Classic and
+  slim, and that is all.
+- **The shelf is this browser's only.** `localStorage`, so a skin kept on the
+  phone is not on the PC. `skins/` on the server is the shared half, and
+  nothing syncs the two.
+- **No batch.** One photograph at a time, and somebody selling a set of forty
+  would want a folder in and a folder out.

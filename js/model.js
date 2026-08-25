@@ -11,9 +11,18 @@
 // screenshots because nobody can say why it looks odd.
 
 import * as THREE from 'three';
-import { parts, OVER_GROW } from './layout.js';
+import { parts, OVER_GROW, BASE } from './layout.js';
 
-const PX = 1 / 16;   // one skin pixel, in world units
+const PX = 1 / 16;   // one sixty-fourth of a skin, in world units
+
+// Half a percent of overlap between neighbouring boxes.
+//
+// Minecraft's parts touch EXACTLY — the body ends where the legs begin — and
+// against an opaque world that is invisible. Photographed against nothing,
+// which is what the listing shot is, the antialiasing at a shared edge lets
+// the background through as a hairline crack down the middle of him. Half a
+// percent closes it and is far too small to see anywhere else.
+const WELD = 1.005;
 
 // BoxGeometry gives its faces in the order +x, -x, +y, -y, +z, -z. With the
 // figure facing -Z that reads: his right, his left, the top, the underneath,
@@ -28,7 +37,7 @@ const FACE_ORDER = ['right', 'left', 'top', 'bottom', 'back', 'front'];
 // happens to sit beside it in the image. It shows up as a dashed grey hem
 // along one edge of a limb and it is invisible until somebody photographs
 // the model against a colour that is not the page.
-const BLEED = 0.05 / 64;
+const BLEED = 0.05;   // in texels; divided by the skin's size below
 
 /**
  * Point one box's faces at their rectangles in the 64x64.
@@ -39,12 +48,13 @@ const BLEED = 0.05 / 64;
  * flip is the difference between a hat that sits on a head and a hat printed
  * back to front.
  */
-function setBoxUV(geo, rects) {
+function setBoxUV(geo, rects, size) {
   const uv = geo.attributes.uv;
+  const e = BLEED / size;
   FACE_ORDER.forEach((face, i) => {
     const [rx, ry, rw, rh] = rects[face];
-    const u0 = rx / 64 + BLEED, u1 = (rx + rw) / 64 - BLEED;
-    const v0 = 1 - ry / 64 - BLEED, v1 = 1 - (ry + rh) / 64 + BLEED;
+    const u0 = rx / size + e, u1 = (rx + rw) / size - e;
+    const v0 = 1 - ry / size - e, v1 = 1 - (ry + rh) / size + e;
     const tl = [u0, v0], tr = [u1, v0], bl = [u0, v1], br = [u1, v1];
     const turn = face === 'top' || face === 'bottom';
     const c = turn ? [br, bl, tr, tl] : [tl, tr, bl, br];
@@ -61,7 +71,7 @@ function setBoxUV(geo, rects) {
  * second, slightly larger box in the same group — near enough to read as the
  * same body, far enough not to fight it for the same pixel.
  */
-export function buildFigure(texture, slim = false) {
+export function buildFigure(texture, slim = false, size = BASE) {
   const group = new THREE.Group();
   const made = {};
   const base = new THREE.MeshLambertMaterial({ map: texture });
@@ -69,13 +79,13 @@ export function buildFigure(texture, slim = false) {
     map: texture, transparent: true, alphaTest: 0.02, depthWrite: true, side: THREE.DoubleSide,
   });
 
-  for (const p of parts(slim)) {
+  for (const p of parts(slim, size)) {
     const [w, h, d] = p.size;
     const joint = new THREE.Group();
     joint.position.set(p.pivot[0] * PX, p.pivot[1] * PX, p.pivot[2] * PX);
 
-    const g = new THREE.BoxGeometry(w * PX, h * PX, d * PX);
-    setBoxUV(g, p.rects);
+    const g = new THREE.BoxGeometry(w * PX * WELD, h * PX * WELD, d * PX * WELD);
+    setBoxUV(g, p.rects, size);
     const mesh = new THREE.Mesh(g, base);
     mesh.position.set(
       (p.at[0] - p.pivot[0]) * PX,
@@ -87,7 +97,7 @@ export function buildFigure(texture, slim = false) {
 
     const grow = OVER_GROW[p.key] || 0.5;
     const g2 = new THREE.BoxGeometry((w + grow) * PX, (h + grow) * PX, (d + grow) * PX);
-    setBoxUV(g2, p.overRects);
+    setBoxUV(g2, p.overRects, size);
     const shell = new THREE.Mesh(g2, over);
     shell.position.copy(mesh.position);
     shell.renderOrder = 1;
@@ -97,7 +107,7 @@ export function buildFigure(texture, slim = false) {
     group.add(joint);
     made[p.key] = { joint, mesh, shell, def: p };
   }
-  return { group, parts: made, materials: { base, over }, slim };
+  return { group, parts: made, materials: { base, over }, slim, size };
 }
 
 /** The texture the figure wears — nearest-neighbour, or it is not pixel art. */
@@ -238,6 +248,7 @@ export function orbit(dom, camera, target, opts = {}) {
  * cheek lives at (11, 12).
  */
 export function pickTexel(fig, camera, ndc, layer = 'both') {
+  const size = fig.size || BASE;
   const ray = new THREE.Raycaster();
   ray.setFromCamera(ndc, camera);
   const meshes = [];
@@ -248,9 +259,9 @@ export function pickTexel(fig, camera, ndc, layer = 'both') {
   const hits = ray.intersectObjects(meshes, false);
   for (const hit of hits) {
     if (!hit.uv) continue;
-    const x = Math.floor(hit.uv.x * 64);
-    const y = Math.floor((1 - hit.uv.y) * 64);
-    if (x < 0 || y < 0 || x > 63 || y > 63) continue;
+    const x = Math.floor(hit.uv.x * size);
+    const y = Math.floor((1 - hit.uv.y) * size);
+    if (x < 0 || y < 0 || x >= size || y >= size) continue;
     return { x, y, ...hit.object.userData, point: hit.point };
   }
   return null;

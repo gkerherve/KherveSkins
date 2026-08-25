@@ -5,7 +5,7 @@
 // the exporter turns it into a PNG — and all four go through here, so there
 // is exactly one place that knows whether the picture on screen is current.
 
-import { SKIN_W, SKIN_H, boxRects, FACES } from './layout.js';
+import { BASE, scaleOf, boxRects, FACES } from './layout.js';
 
 export const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
 export const clamp255 = (v) => (v < 0 ? 0 : v > 255 ? 255 : Math.round(v));
@@ -95,14 +95,48 @@ export function fromHsl(h, s, l, a = 255) {
  * is the paper.
  */
 export class Skin {
-  constructor() {
+  constructor(size = BASE) {
+    this.size = size;
     this.canvas = document.createElement('canvas');
-    this.canvas.width = SKIN_W;
-    this.canvas.height = SKIN_H;
+    this.canvas.width = size;
+    this.canvas.height = size;
     this.ctx = this.canvas.getContext('2d', { willReadFrequently: true });
-    this.img = this.ctx.createImageData(SKIN_W, SKIN_H);
+    this.img = this.ctx.createImageData(size, size);
     this.dirty = true;
     this.version = 0;
+  }
+
+  /**
+   * Change how finely this skin is painted.
+   *
+   * Everything already on it comes along, nearest-neighbour: going up, one
+   * texel becomes a block of them, and going down a block becomes the one
+   * that was in its corner. Anybody who has painted an eye and then asked
+   * for more pixels wants their eye to still be there, four times the size
+   * and ready to be improved — not a blank head and an apology.
+   */
+  resize(size) {
+    if (size === this.size) return this;
+    const from = this.size, old = this.img;
+    const k = size / from;
+    const next = this.ctx.createImageData(size, size);
+    for (let y = 0; y < size; y++) {
+      const sy = Math.min(from - 1, Math.floor(y / k));
+      for (let x = 0; x < size; x++) {
+        const sx = Math.min(from - 1, Math.floor(x / k));
+        const a = (sy * from + sx) * 4, b = (y * size + x) * 4;
+        next.data[b] = old.data[a];
+        next.data[b + 1] = old.data[a + 1];
+        next.data[b + 2] = old.data[a + 2];
+        next.data[b + 3] = old.data[a + 3];
+      }
+    }
+    this.size = size;
+    this.canvas.width = size;
+    this.canvas.height = size;
+    this.img = next;
+    this.touch();
+    return this;
   }
 
   clear() {
@@ -125,15 +159,15 @@ export class Skin {
   }
 
   get(x, y) {
-    if (x < 0 || y < 0 || x >= SKIN_W || y >= SKIN_H) return [0, 0, 0, 0];
-    const i = (y * SKIN_W + x) * 4;
+    if (x < 0 || y < 0 || x >= this.size || y >= this.size) return [0, 0, 0, 0];
+    const i = (y * this.size + x) * 4;
     const d = this.img.data;
     return [d[i], d[i + 1], d[i + 2], d[i + 3]];
   }
 
   set(x, y, c) {
-    if (!c || x < 0 || y < 0 || x >= SKIN_W || y >= SKIN_H) return;
-    const i = (y * SKIN_W + x) * 4;
+    if (!c || x < 0 || y < 0 || x >= this.size || y >= this.size) return;
+    const i = (y * this.size + x) * 4;
     const d = this.img.data;
     d[i] = clamp255(c[0]);
     d[i + 1] = clamp255(c[1]);
@@ -172,7 +206,7 @@ export class Skin {
   }
 
   clone() {
-    const s = new Skin();
+    const s = new Skin(this.size);
     s.img.data.set(this.img.data);
     s.touch();
     return s;
@@ -209,14 +243,21 @@ export class Skin {
    * everything downstream only ever sees one layout.
    */
   fromImage(image) {
+    const legacy = image.height * 2 === image.width;
+    // a skin is square and its edge is a power of two; anything else is
+    // somebody's screenshot and is treated as a 64
+    const size = legacy ? BASE
+      : [64, 128, 256].includes(image.width) && image.width === image.height ? image.width : BASE;
+    this.size = size;
+    this.canvas.width = size;
+    this.canvas.height = size;
     const c = document.createElement('canvas');
-    c.width = SKIN_W; c.height = SKIN_H;
+    c.width = size; c.height = size;
     const cx = c.getContext('2d', { willReadFrequently: true });
     cx.imageSmoothingEnabled = false;
-    const legacy = image.height * 2 === image.width;
-    const rows = legacy ? 32 : Math.min(64, Math.round(image.height * 64 / image.width));
-    cx.drawImage(image, 0, 0, image.width, image.height, 0, 0, 64, rows);
-    this.img = cx.getImageData(0, 0, SKIN_W, SKIN_H);
+    const rows = legacy ? size / 2 : size;
+    cx.drawImage(image, 0, 0, image.width, image.height, 0, 0, size, rows);
+    this.img = cx.getImageData(0, 0, size, size);
     this.touch();
     if (legacy) this.widenLegacy();
     return this;
@@ -224,9 +265,10 @@ export class Skin {
 
   /** 64x32's single arm and leg, mirrored onto the sides that format lacked. */
   widenLegacy() {
+    const s = scaleOf(this.size);
     const pairs = [
-      [boxRects(40, 16, 4, 12, 4), boxRects(32, 48, 4, 12, 4)],
-      [boxRects(0, 16, 4, 12, 4), boxRects(16, 48, 4, 12, 4)],
+      [boxRects(40, 16, 4, 12, 4, s), boxRects(32, 48, 4, 12, 4, s)],
+      [boxRects(0, 16, 4, 12, 4, s), boxRects(16, 48, 4, 12, 4, s)],
     ];
     // a mirrored limb swaps its own left and right as well as flipping
     const map = { top: 'top', bottom: 'bottom', front: 'front', back: 'back', right: 'left', left: 'right' };
@@ -234,6 +276,45 @@ export class Skin {
       for (const f of FACES) this.copyRect(src[f], dst[map[f]], true);
     }
     this.touch();
+  }
+
+  /**
+   * The same skin at a different size, as a data URL, without changing this
+   * one.
+   *
+   * Vanilla Java takes a 64 and nothing else, so an HD skin has to be able
+   * to come back down. Averaging on the way down rather than dropping three
+   * texels in four: a 32-pixel face that has had work done on it deserves
+   * better than to be sampled at one corner.
+   */
+  toDataURLAt(size) {
+    if (size === this.size) return this.toDataURL();
+    const k = this.size / size;
+    const c = document.createElement('canvas');
+    c.width = size; c.height = size;
+    const cx = c.getContext('2d');
+    const out = cx.createImageData(size, size);
+    for (let y = 0; y < size; y++) {
+      for (let x = 0; x < size; x++) {
+        let r = 0, g = 0, b = 0, a = 0, n = 0;
+        for (let j = 0; j < k; j++) {
+          for (let i = 0; i < k; i++) {
+            const c2 = this.get(Math.floor(x * k + i), Math.floor(y * k + j));
+            // transparency does not average with colour, or the edge of a
+            // hat comes out as a grey smear at half opacity
+            if (c2[3] > 127) { r += c2[0]; g += c2[1]; b += c2[2]; n++; }
+            a += c2[3];
+          }
+        }
+        const o = (y * size + x) * 4;
+        out.data[o] = n ? r / n : 0;
+        out.data[o + 1] = n ? g / n : 0;
+        out.data[o + 2] = n ? b / n : 0;
+        out.data[o + 3] = a / (k * k) > 127 ? 255 : 0;
+      }
+    }
+    cx.putImageData(out, 0, 0);
+    return c.toDataURL('image/png');
   }
 }
 
