@@ -153,19 +153,41 @@ def figure(d: ImageDraw.ImageDraw, angle: int) -> None:
             d.rectangle([px - half, y0, px + half, cut], fill=SHIRT)
             d.rectangle([px - half, cut, px + half, y1], fill=SKIN)
             continue
-        # the head: a face with hair over it, and more hair round the back
+        # THE HEAD, and the one thing about a head that tells a program which
+        # way somebody turned: the face is skin and the back of it is hair, so
+        # which SIDE of the head the skin sits on is the answer.
+        #
+        # Worked out rather than faked per angle, because faking it is how a
+        # fixture comes to agree with a bug. A point on a head at body angle φ
+        # round from the face lands at u = r·sin(φ + a) and is visible while
+        # cos(φ + a) > 0. Intersect the two and the face fills u from −r·cos a
+        # up to +r when he has turned one way, and −r up to +r·cos a when he
+        # has turned the other. At nought that is the whole width, at ninety
+        # exactly half, at a hundred and eighty none of it.
+        #
+        # The old head drew a full-width skin box under a hair cap, so its two
+        # profiles were identical and every left-right check quietly passed.
         d.rectangle([px - half, y0 + 12, px + half, y1], fill=SKIN)
-        cap = 0.80 if cos < -0.4 else 0.40
-        d.rectangle([px - half - 3, y0, px + half + 3, y0 + int((y1 - y0) * cap)], fill=HAIR)
-        if cos > 0.4:
-            for ex in (-half / 2, half / 2):
-                d.rectangle([px + ex - 6, y0 + 58, px + ex + 6, y0 + 68], fill=(56, 50, 48))
+        side = 1 if sin >= 0 else -1
+        edge = px - half * cos * side
+        if side > 0:
+            d.rectangle([px - half - 3, y0 + 12, edge, y1], fill=HAIR)
+            f0, f1 = edge, px + half
+        else:
+            d.rectangle([edge, y0 + 12, px + half + 3, y1], fill=HAIR)
+            f0, f1 = px - half, edge
+        # the fringe is on top of him whichever way he is facing
+        d.rectangle([px - half - 3, y0, px + half + 3, y0 + int((y1 - y0) * 0.32)], fill=HAIR)
+        wide = f1 - f0
+        if wide > half * 1.2:                          # enough face for two eyes
+            for t in (0.28, 0.72):
+                ex = f0 + wide * t
+                d.rectangle([ex - 6, y0 + 58, ex + 6, y0 + 68], fill=(56, 50, 48))
             d.rectangle([px - 11, y0 + 96, px + 11, y0 + 104], fill=(160, 104, 100))
-        elif abs(cos) <= 0.4:
-            # in profile the face is on the side he is turned toward, which is
-            # the only left-right clue a silhouette ever offers
-            nose = half * 0.55 * (1 if sin > 0 else -1)
-            d.rectangle([px + nose - 5, y0 + 58, px + nose + 5, y0 + 70], fill=(56, 50, 48))
+        elif wide > half * 0.25:                       # a profile: nose and lip
+            nose = f1 - 6 if side > 0 else f0 + 6
+            d.rectangle([nose - 5, y0 + 58, nose + 5, y0 + 70], fill=(56, 50, 48))
+            d.rectangle([nose - 6, y0 + 96, nose + 6, y0 + 104], fill=(160, 104, 100))
 
 
 def shadows(img: Image.Image, angle: int) -> Image.Image:
@@ -207,9 +229,60 @@ def shot(angle, path: str) -> None:
     print(path)
 
 
+# A figure that is NOT left-right symmetric, which is the only kind that can
+# test which way round the side views go.
+#
+# The ground truth is physical and needs no convention to state: in the FRONT
+# photograph the person faces the camera, so whatever appears on the LEFT of
+# that picture is on the person's OWN RIGHT. The generator places its parts by
+# `px = cx + x*cos - z*sin`, so at nought a part at negative x lands on the
+# left of the frame — which is why PARTS calls x=-20 the right leg. Paint that
+# arm red and the red arm is his right arm, in every view, for ever.
+MARK = {-57: (206, 44, 44), +57: (44, 92, 206)}     # right red, left blue
+
+# The same trick on the head, for the framing people actually use when they
+# want a FACE: a head-and-shoulders portrait. A patch on each cheek, his right
+# one red, sitting forward of centre so it shows in profile as well as head-on.
+CHEEKS = [
+    (-26, -14, 7, 7, 0.095, 0.145, (206, 44, 44)),
+    (+26, -14, 7, 7, 0.095, 0.145, (44, 92, 206)),
+    # Hair UP, in a bun, which is what half the people who photograph their own
+    # face are wearing — and it is the thing that broke this. Anything that
+    # looks at "the top sixth of the outline" for a face finds a bun, scores
+    # nought either way, and then picks which way the person turned out of the
+    # rounding error underneath it.
+    (0, 6, 15, 15, -0.030, 0.005, HAIR),
+]
+PORTRAIT = (0, 232, W, 720)                        # head, neck and shoulders
+
+
 def main() -> None:
     import sys
     turns = 8
+    if "--portrait" in sys.argv:
+        # what somebody photographing their own face hands the program: the
+        # neck is HALFWAY down the outline, not an eighth of the way
+        PARTS.extend(CHEEKS)
+        os.makedirs(OUT, exist_ok=True)
+        for a in [None, 0, 45, 90, 135, 180, 225, 270, 315]:
+            name = "port-plate.png" if a is None else f"port-{a}.png"
+            path = os.path.join(OUT, name)
+            shot(a, path)
+            Image.open(path).crop(PORTRAIT).save(path)
+        print("head-and-shoulders framing; his RIGHT cheek is red")
+        print("and lands on the LEFT of port-0.png")
+        return
+    if "--mark" in sys.argv:
+        # his right arm red, his left arm blue, and nothing else changed
+        for i, part in enumerate(PARTS):
+            if part[2] == 13:
+                PARTS[i] = part[:6] + (MARK[part[0]],)
+        os.makedirs(OUT, exist_ok=True)
+        shot(None, os.path.join(OUT, "mark-plate.png"))
+        for a in (0, 45, 90, 135, 180, 225, 270, 315):
+            shot(a, os.path.join(OUT, f"mark-{a}.png"))
+        print("his RIGHT arm is red and lands on the LEFT of mark-0.png")
+        return
     if "--turns" in sys.argv:
         turns = int(sys.argv[sys.argv.index("--turns") + 1])
     os.makedirs(OUT, exist_ok=True)
