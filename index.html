@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#0b1020">
+<meta name="description" content="Turn a photograph into a Minecraft skin, adjust it, and export the 64x64 PNG.">
+<title>KherveSkins — a photograph, as a Minecraft skin</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<style>
+  :root {
+    --bg: #0b1020;
+    --panel: #111a2e;
+    --panel2: #16203a;
+    --line: rgba(255,255,255,.12);
+    --ink: #cfd8ea;
+    --ink-dim: #8b99b5;
+    --white: #fff;
+    --blue: #3d78d8;
+    --blue-lit: #6ba0ff;
+    --good: #8ce8a8;
+    --bad: #ff9d9d;
+    --pad: 14px;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    margin: 0; height: 100%; background: var(--bg); color: var(--ink);
+    font: 14px/1.5 "Segoe UI", system-ui, -apple-system, sans-serif;
+    overscroll-behavior: none;
+  }
+  body { display: flex; flex-direction: column; overflow: hidden; }
+
+  /* ---- the bar across the top ---------------------------------------- */
+  header {
+    display: flex; align-items: center; gap: 10px; padding: 8px 12px;
+    padding-top: max(8px, env(safe-area-inset-top));
+    background: #0d1424; border-bottom: 1px solid var(--line); flex: none;
+  }
+  header h1 {
+    font-size: 15px; margin: 0; color: var(--white); font-weight: 650;
+    letter-spacing: .01em; white-space: nowrap;
+  }
+  header h1 span { color: var(--ink-dim); font-weight: 400; }
+  .grow { flex: 1; }
+
+  /* ---- the two halves -------------------------------------------------- */
+  main { flex: 1; display: flex; min-height: 0; }
+  #stage {
+    position: relative; flex: 1; min-width: 0; min-height: 0;
+    background: radial-gradient(120% 90% at 50% 15%, #1b2743 0%, #0a0f1c 70%);
+  }
+  #stage canvas { display: block; width: 100%; height: 100%; touch-action: none; }
+  #stageTools {
+    position: absolute; left: 10px; top: 10px; display: flex; gap: 6px; flex-wrap: wrap;
+    max-width: calc(100% - 20px);
+  }
+  #stageInfo {
+    position: absolute; left: 12px; bottom: 10px; font-size: 12px; color: var(--ink-dim);
+    text-shadow: 0 1px 3px #000; pointer-events: none;
+  }
+
+  #side {
+    width: 372px; flex: none; display: flex; flex-direction: column;
+    background: var(--panel); border-left: 1px solid var(--line); min-height: 0;
+  }
+  #tabs { display: flex; border-bottom: 1px solid var(--line); flex: none; }
+  #tabs button {
+    flex: 1; padding: 11px 4px; background: none; border: 0; color: var(--ink-dim);
+    font: inherit; font-size: 13px; cursor: pointer; border-bottom: 2px solid transparent;
+  }
+  #tabs button.on { color: var(--white); border-bottom-color: var(--blue-lit); background: var(--panel2); }
+  #panels { flex: 1; overflow-y: auto; overscroll-behavior: contain; padding: var(--pad); padding-bottom: 40px; }
+  .panel { display: none; }
+  .panel.on { display: block; }
+
+  /* ---- controls -------------------------------------------------------- */
+  h2 {
+    font-size: 11px; text-transform: uppercase; letter-spacing: .07em; color: var(--ink-dim);
+    margin: 20px 0 8px; font-weight: 700;
+  }
+  h2:first-child { margin-top: 0; }
+  .hint { color: var(--ink-dim); font-size: 12.5px; margin: 6px 0 10px; }
+  .row { display: flex; align-items: center; gap: 10px; margin: 7px 0; }
+  .row > label { flex: 1.1; font-size: 13px; }
+  .row input[type=range] { flex: 1.6; min-width: 0; accent-color: var(--blue-lit); height: 26px; }
+  .row output { width: 40px; text-align: right; font-size: 12px; color: var(--ink-dim); font-variant-numeric: tabular-nums; }
+  input[type=color] {
+    width: 40px; height: 28px; padding: 0; border: 1px solid var(--line);
+    background: none; border-radius: 6px; cursor: pointer; flex: none;
+  }
+  input[type=text], input[type=search] {
+    width: 100%; padding: 9px 10px; border-radius: 8px; background: #0e1626;
+    color: var(--white); border: 1px solid var(--line); font: inherit; font-size: 13px;
+  }
+  button, .btn {
+    padding: 9px 13px; border-radius: 8px; cursor: pointer; font: inherit; font-size: 13px;
+    background: var(--panel2); color: var(--ink); border: 1px solid var(--line);
+    display: inline-flex; align-items: center; gap: 7px; justify-content: center;
+  }
+  button:hover { border-color: rgba(255,255,255,.28); }
+  button.on { background: var(--blue); color: var(--white); border-color: var(--blue-lit); }
+  button.big { width: 100%; padding: 13px; font-size: 14px; margin: 6px 0; }
+  button.key { background: var(--blue); color: #fff; border-color: var(--blue-lit); font-weight: 600; }
+  button.small { padding: 6px 9px; font-size: 12px; }
+  .btns { display: flex; gap: 7px; flex-wrap: wrap; margin: 8px 0; }
+  .btns > * { flex: 1; min-width: 84px; }
+  .seg { display: flex; gap: 0; margin: 8px 0; }
+  .seg button { flex: 1; border-radius: 0; border-right-width: 0; }
+  .seg button:first-child { border-radius: 8px 0 0 8px; }
+  .seg button:last-child { border-radius: 0 8px 8px 0; border-right-width: 1px; }
+  label.check { display: flex; align-items: center; gap: 9px; margin: 9px 0; font-size: 13px; cursor: pointer; }
+  label.check input { width: 18px; height: 18px; accent-color: var(--blue-lit); }
+  .say { min-height: 1.4em; font-size: 12.5px; margin-top: 8px; }
+  .say.good { color: var(--good); }
+  .say.bad { color: var(--bad); }
+
+  canvas.board {
+    width: 100%; display: block; border-radius: 10px; border: 1px solid var(--line);
+    background: #0d1424; touch-action: none;
+  }
+  #cropWrap { position: relative; margin-bottom: 10px; }
+  #dropNote {
+    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    text-align: center; padding: 20px; color: var(--ink-dim); font-size: 13px; pointer-events: none;
+  }
+
+  /* the colours the photo gave us */
+  .swatch { display: flex; align-items: center; gap: 9px; margin: 8px 0; }
+  .swatch .chip { width: 26px; height: 26px; border-radius: 6px; border: 1px solid var(--line); flex: none; }
+  .swatch .who { flex: 1; font-size: 13px; }
+  .swatch .who small { display: block; color: var(--ink-dim); font-size: 11px; }
+
+  /* the shelf */
+  #shelf { display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); gap: 9px; margin-top: 10px; }
+  .card {
+    background: var(--panel2); border: 1px solid var(--line); border-radius: 9px; padding: 6px;
+    text-align: center; cursor: pointer; position: relative;
+  }
+  .card img { width: 100%; image-rendering: pixelated; border-radius: 5px; background: #0d1424; }
+  .card b { display: block; font-size: 11px; font-weight: 500; color: var(--ink); margin-top: 4px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .card .x {
+    position: absolute; top: 2px; right: 2px; width: 20px; height: 20px; line-height: 18px;
+    border-radius: 5px; background: rgba(10,14,26,.8); color: var(--ink-dim); font-size: 13px;
+    border: 1px solid var(--line); padding: 0;
+  }
+  .card .x:hover { color: var(--bad); }
+
+  /* the painter's tools */
+  #tools { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin: 8px 0; }
+  #recent { display: flex; gap: 5px; flex-wrap: wrap; margin: 8px 0; }
+  #recent button { width: 26px; height: 26px; padding: 0; border-radius: 6px; min-width: 0; }
+
+  .note {
+    border-left: 2px solid rgba(255,209,102,.5); padding: 8px 10px; margin: 14px 0;
+    background: rgba(255,209,102,.06); color: var(--ink-dim); font-size: 12px; border-radius: 0 6px 6px 0;
+  }
+
+  /* ---- a phone --------------------------------------------------------- */
+  @media (max-width: 860px) {
+    main { flex-direction: column; }
+    #stage { flex: none; height: 40vh; min-height: 220px; }
+    #side { width: auto; border-left: 0; border-top: 1px solid var(--line); flex: 1; }
+    #panels { padding-bottom: max(40px, env(safe-area-inset-bottom)); }
+    header h1 span { display: none; }
+  }
+  @media (max-width: 420px) {
+    #tabs button { font-size: 12px; padding: 10px 2px; }
+  }
+</style>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js"
+  }
+}
+</script>
+</head>
+<body>
+
+<header>
+  <h1>KherveSkins <span>— a photograph, as a Minecraft skin</span></h1>
+  <div class="grow"></div>
+  <button id="slimBtn" class="small" title="three-pixel arms (Alex) instead of four (Steve)">classic arms</button>
+  <button id="poseBtn" class="small">walking</button>
+</header>
+
+<main>
+  <div id="stage">
+    <div id="stageTools">
+      <button id="spinBtn" class="small">spin</button>
+      <button id="frontBtn" class="small">front</button>
+      <button id="modelPaintBtn" class="small" title="click the figure to paint on it">paint on him</button>
+    </div>
+    <div id="stageInfo">drag to turn · pinch or scroll to zoom</div>
+  </div>
+
+  <div id="side">
+    <div id="tabs">
+      <button data-tab="photo" class="on">Photo</button>
+      <button data-tab="face">Face</button>
+      <button data-tab="look">Look</button>
+      <button data-tab="paint">Paint</button>
+      <button data-tab="save">Save</button>
+    </div>
+    <div id="panels">
+
+      <!-- ============================ PHOTO ============================ -->
+      <section class="panel on" data-panel="photo">
+        <div class="btns">
+          <button id="pickBtn" class="key">Choose a photo</button>
+          <button id="camBtn">Camera</button>
+        </div>
+        <input type="file" id="fileIn" accept="image/*" hidden>
+        <input type="file" id="camIn" accept="image/*" capture="user" hidden>
+
+        <div id="cropWrap">
+          <canvas id="crop" class="board" width="700" height="560"></canvas>
+          <div id="dropNote">Drop a photograph here, paste one, or use the buttons above.<br>
+            A head-and-shoulders shot, looking at the camera, gives the best face.</div>
+        </div>
+
+        <div class="btns">
+          <button id="autoBtn">Find the face again</button>
+          <button id="resetFrameBtn">Centre the box</button>
+        </div>
+        <div class="hint">
+          Drag the box round the whole head — <b>top of the hair to the bottom of the
+          chin</b>. Then drag the two dashed lines onto the eyes and the mouth. Those
+          lines are what make a face read at eight pixels across, so they are worth
+          getting right.
+        </div>
+
+        <h2>Lean</h2>
+        <div class="row">
+          <label for="tilt">head tilt</label>
+          <input type="range" id="tilt" min="-0.5" max="0.5" step="0.01" value="0">
+          <output id="tiltOut">0</output>
+        </div>
+        <div class="say" id="photoSay"></div>
+      </section>
+
+      <!-- ============================ FACE ============================= -->
+      <section class="panel" data-panel="face">
+        <h2>Where the features land</h2>
+        <div class="hint">Which of the eight rows of the face the eyes and the mouth are
+          pinned to. Classic Minecraft faces put them on 4 and 6.</div>
+        <div class="row"><label for="eyeRow">eye row</label>
+          <input type="range" id="eyeRow" min="2.5" max="5.5" step="0.5" value="4.5"><output id="eyeRowOut">4.5</output></div>
+        <div class="row"><label for="mouthRow">mouth row</label>
+          <input type="range" id="mouthRow" min="4.5" max="7.5" step="0.5" value="6.5"><output id="mouthRowOut">6.5</output></div>
+        <div class="row"><label for="zoomX">face width</label>
+          <input type="range" id="zoomX" min="0.7" max="1.5" step="0.02" value="1"><output id="zoomXOut">1</output></div>
+        <div class="row"><label for="shiftX">nudge across</label>
+          <input type="range" id="shiftX" min="-30" max="30" step="1" value="0"><output id="shiftXOut">0</output></div>
+        <div class="row"><label for="shiftY">nudge down</label>
+          <input type="range" id="shiftY" min="-30" max="30" step="1" value="0"><output id="shiftYOut">0</output></div>
+
+        <h2>The photograph</h2>
+        <div class="row"><label for="bright">brightness</label>
+          <input type="range" id="bright" min="-0.5" max="0.5" step="0.02" value="0"><output id="brightOut">0</output></div>
+        <div class="row"><label for="contrast">contrast</label>
+          <input type="range" id="contrast" min="-0.3" max="0.9" step="0.02" value="0.2"><output id="contrastOut">0.2</output></div>
+        <div class="row"><label for="satur">colour</label>
+          <input type="range" id="satur" min="-1" max="1" step="0.02" value="0.28"><output id="saturOut">0.28</output></div>
+        <div class="row"><label for="warmth">warmth</label>
+          <input type="range" id="warmth" min="-1" max="1" step="0.02" value="0"><output id="warmthOut">0</output></div>
+        <div class="row"><label for="detail">sharpness</label>
+          <input type="range" id="detail" min="0" max="1.4" step="0.02" value="0.55"><output id="detailOut">0.55</output></div>
+        <div class="row"><label for="levels">flatten colours</label>
+          <input type="range" id="levels" min="0" max="12" step="1" value="0"><output id="levelsOut">off</output></div>
+
+        <h2>The drawing on top</h2>
+        <div class="hint">How hard the eyes, the brow line and the mouth are pushed. All
+          of it uses colours found in the photograph — turned right down, you get a
+          straight resize, which is usually mush.</div>
+        <div class="row"><label for="features">features</label>
+          <input type="range" id="features" min="0" max="1" step="0.02" value="0.6"><output id="featuresOut">0.6</output></div>
+      </section>
+
+      <!-- ============================ LOOK ============================= -->
+      <section class="panel" data-panel="look">
+        <h2>How many pixels</h2>
+        <div class="seg" id="sizes"></div>
+        <div class="hint" id="sizeNote"></div>
+
+        <h2>Colours</h2>
+        <div class="hint">Taken off the photograph where it could be. Tick one to choose
+          it yourself — for a head-and-shoulders shot, the trousers and the shoes were
+          never in the picture and have been invented.</div>
+        <div id="swatches"></div>
+
+        <h2>Cloth</h2>
+        <div class="row"><label for="sleeve">sleeve length</label>
+          <input type="range" id="sleeve" min="0" max="12" step="1" value="8"><output id="sleeveOut">8</output></div>
+        <div class="row"><label for="boot">boot height</label>
+          <input type="range" id="boot" min="0" max="12" step="1" value="3"><output id="bootOut">3</output></div>
+
+        <h2>The look of it</h2>
+        <div class="row"><label for="shading">shading</label>
+          <input type="range" id="shading" min="0" max="1.4" step="0.02" value="0.55"><output id="shadingOut">0.55</output></div>
+        <div class="row"><label for="grain">grain</label>
+          <input type="range" id="grain" min="0" max="1.2" step="0.02" value="0.3"><output id="grainOut">0.3</output></div>
+        <label class="check"><input type="checkbox" id="hairLayer"> hair on its own layer, standing proud of the skull</label>
+        <label class="check"><input type="checkbox" id="ears" checked> ears</label>
+        <div class="btns"><button id="reseedBtn">Different grain</button></div>
+      </section>
+
+      <!-- ============================ PAINT ============================ -->
+      <section class="panel" data-panel="paint">
+        <canvas id="board" class="board" width="700" height="700"></canvas>
+        <div id="hoverSay" class="hint" style="min-height:1.4em"></div>
+
+        <div id="tools">
+          <button data-tool="brush" class="on">Brush</button>
+          <button data-tool="erase">Erase</button>
+          <button data-tool="pick">Pick</button>
+          <button data-tool="fill">Fill</button>
+          <button data-tool="light">Lighten</button>
+          <button data-tool="dark">Darken</button>
+        </div>
+        <div class="row">
+          <input type="color" id="brushColour" value="#c23a2e">
+          <label for="brushSize" style="flex:none">size</label>
+          <input type="range" id="brushSize" min="1" max="4" step="1" value="1"><output id="brushSizeOut">1</output>
+        </div>
+        <div id="recent"></div>
+        <div class="seg" id="layerSeg">
+          <button data-layer="both" class="on">both layers</button>
+          <button data-layer="base">skin</button>
+          <button data-layer="over">outer</button>
+        </div>
+        <label class="check"><input type="checkbox" id="mirror" checked> mirror onto the other side of the body</label>
+        <div class="btns">
+          <button id="undoBtn">Undo</button>
+          <button id="redoBtn">Redo</button>
+          <button id="fitBtn">Fit</button>
+        </div>
+        <div class="btns">
+          <button id="clearPartBtn" class="small">Clear a part…</button>
+          <button id="revertBtn" class="small">Undo all my painting</button>
+        </div>
+        <div class="hint">Painting survives the sliders: move anything on the other tabs
+          and the face is rebuilt underneath, with your work laid back on top.</div>
+      </section>
+
+      <!-- ============================ SAVE ============================= -->
+      <section class="panel" data-panel="save">
+        <h2>Name</h2>
+        <input type="text" id="name" value="my-skin" spellcheck="false" autocomplete="off">
+
+        <h2>Out</h2>
+        <button id="dlBtn" class="big key">Download the skin</button>
+        <button id="dl64Btn" class="big" style="display:none">Download a 64×64 as well (for Java)</button>
+        <div class="btns">
+          <button id="shareBtn">Share…</button>
+          <button id="copyBtn">Copy</button>
+        </div>
+        <div class="btns">
+          <button id="shotBtn">Listing picture</button>
+          <button id="diskBtn">Save to skins/</button>
+        </div>
+        <div class="say" id="saveSay"></div>
+        <div class="hint">
+          That PNG is a finished Minecraft skin. Upload it at
+          <b>minecraft.net → profile → skins</b>, or in Bedrock: Dressing Room →
+          Classic Skins → Owned → Import. Vanilla Java takes <b>64×64 only</b>;
+          128 and 256 are for Bedrock skin packs and for Java with an HD-skin
+          mod, so at those sizes there is a 64×64 on offer too.
+        </div>
+
+        <h2>The shelf</h2>
+        <div class="btns"><button id="keepBtn">Keep this one</button>
+          <button id="newBtn">Start again</button></div>
+        <div id="shelf"></div>
+
+        <h2>Start from a skin</h2>
+        <div class="btns"><button id="importBtn">Open a 64×64 PNG</button></div>
+        <input type="file" id="skinIn" accept="image/png" hidden>
+        <div class="hint">Reads an existing skin — 64×64 or the old 64×32 — so you can
+          paint over one you already have.</div>
+
+        <div class="note">
+          Selling skins: the tool is yours to sell the output of, but a real person's
+          face is their own. A recognisable likeness of a living celebrity, sold, is a
+          publicity-rights problem in most places however it was drawn — which is a
+          question about who is in the photograph, not about this program.
+        </div>
+      </section>
+
+    </div>
+  </div>
+</main>
+
+<script type="module" src="js/app.js"></script>
+<script>
+  if ('serviceWorker' in navigator) {
+    addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+  }
+</script>
+</body>
+</html>
