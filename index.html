@@ -179,28 +179,40 @@
   .shot.done .who { align-self: flex-end; width: 100%; background: rgba(9,13,24,.72); }
   .shot .turn { position: absolute; inset: 0; z-index: 1; opacity: .5; }
 
-  /* ---- the wardrobe ---------------------------------------------------- */
-  #cats button {
-    display: flex; width: 100%; justify-content: space-between; align-items: center;
-    padding: 13px 14px; margin: 0; border-radius: 0; border: 0;
-    border-bottom: 1px solid var(--line); background: none; font-size: 14px;
-    color: var(--white); letter-spacing: .01em;
+  /* ---- the wardrobe, as a tree ----------------------------------------- */
+  .branch { border-bottom: 1px solid var(--line); }
+  .branch:first-child { border-top: 1px solid var(--line); }
+  .twig {
+    display: flex; width: 100%; align-items: center; gap: 10px; text-align: left;
+    padding: 12px 6px; margin: 0; border: 0; border-radius: 0; background: none;
+    font-size: 14px; color: var(--white);
   }
-  #cats button:first-child { border-top: 1px solid var(--line); }
-  #cats button:hover { background: var(--panel2); }
-  #cats button span { color: var(--ink-dim); font-size: 12px; }
-  .rackbar { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
-  .rackbar b { flex: 1; color: var(--white); font-size: 14px; }
-  #grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(74px, 1fr)); gap: 7px; }
+  .twig:hover { background: var(--panel2); }
+  .twig .caret {
+    flex: none; width: 12px; color: var(--ink-dim); font-size: 11px;
+    transition: transform .12s ease; display: inline-block;
+  }
+  .branch.open .caret { transform: rotate(90deg); color: var(--blue-lit); }
+  .twig .nm { flex: 1; }
+  .twig .val { color: var(--ink-dim); font-size: 12px; text-align: right; }
+  .twig .swatchdot {
+    width: 16px; height: 16px; border-radius: 4px; border: 1px solid var(--line); flex: none;
+  }
+  .leafy { display: none; padding: 2px 0 14px; }
+  .branch.open .leafy { display: block; }
+  .rackbar { display: flex; align-items: center; gap: 10px; margin: 2px 0 10px; }
+  .rackbar span { flex: 1; color: var(--ink-dim); font-size: 12px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(72px, 1fr)); gap: 7px; }
   .wear {
     background: #10182a; border: 1px solid var(--line); border-radius: 8px;
     padding: 4px 4px 5px; cursor: pointer; text-align: center;
   }
   .wear.on { border-color: var(--blue-lit); background: #1d2c4c; }
-  .wear canvas, .wear img { width: 100%; display: block; image-rendering: pixelated; }
+  .wear img { width: 100%; display: block; image-rendering: pixelated; aspect-ratio: 1; }
   .wear b { display: block; font-size: 10.5px; font-weight: 500; color: var(--ink-dim);
     margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .wear.on b { color: var(--white); }
+  .style { padding: 0 2px; }
 
   /* ---- moving about the flat image ------------------------------------- */
   .navbar { display: flex; gap: 6px; margin: 8px 0; align-items: stretch; }
@@ -237,7 +249,7 @@
   <h1>KherveSkins <span>— a photograph, as a Minecraft skin</span></h1>
   <div class="grow"></div>
   <button id="slimBtn" class="small" title="three-pixel arms (Alex) instead of four (Steve)">classic arms</button>
-  <button id="poseBtn" class="small">walking</button>
+  <button id="poseBtn" class="small">standing</button>
 </header>
 
 <main>
@@ -245,6 +257,7 @@
     <div id="stageTools">
       <button id="spinBtn" class="small">spin</button>
       <button id="frontBtn" class="small">front</button>
+      <button id="lookBtn" class="small on" title="his head follows the pointer">looking at you</button>
       <button id="modelPaintBtn" class="small" title="click the figure to paint on it">paint on him</button>
     </div>
     <div id="stageInfo">drag to turn · pinch or scroll to zoom</div>
@@ -403,57 +416,51 @@
 
       <!-- ============================ WEAR ============================= -->
       <section class="panel" data-panel="wear">
-        <div id="cats"></div>
+        <div class="hint" id="wearHint">Tap a heading to open it. More than one can
+          be open at once, and they stay how you leave them.</div>
+        <div id="tree"></div>
 
-        <div id="rack" hidden>
-          <div class="rackbar">
-            <button id="backCats" class="small">‹ All</button>
-            <b id="rackName"></b>
-            <input type="color" id="rackColour" value="#888888" title="colour">
+        <template id="styleTpl">
+          <div class="style">
+            <h2>How many pixels</h2>
+            <div class="seg" id="sizes"></div>
+            <div class="hint" id="sizeNote"></div>
+
+            <h2>Build</h2>
+            <div class="seg" id="buildSeg">
+              <button data-slim="0">Classic arms</button>
+              <button data-slim="1">Slim arms</button>
+            </div>
+
+            <h2>Colours</h2>
+            <div class="hint">Taken off the photograph where it could be. Tick one to
+              choose it yourself — for a head-and-shoulders shot, the trousers and the
+              shoes were never in the picture and have been invented.</div>
+            <div id="swatches"></div>
+
+            <h2>From the photograph</h2>
+            <label class="check"><input type="checkbox" id="photoBody" checked>
+              take the clothes off the photograph, not off a swatch</label>
+            <div class="hint">With this on, the shirt in the picture — its print, its
+              stripes, the way the light falls off the shoulder — is sampled onto the
+              body, the arms and the legs, exactly as the face is.</div>
+
+            <h2>Cloth</h2>
+            <div class="row"><label for="sleeve">sleeve length</label>
+              <input type="range" id="sleeve" min="0" max="12" step="1" value="8"><output id="sleeveOut">8</output></div>
+            <div class="row"><label for="boot">boot height</label>
+              <input type="range" id="boot" min="0" max="12" step="1" value="3"><output id="bootOut">3</output></div>
+
+            <h2>The look of it</h2>
+            <div class="row"><label for="shading">shading</label>
+              <input type="range" id="shading" min="0" max="1.4" step="0.02" value="0.55"><output id="shadingOut">0.55</output></div>
+            <div class="row"><label for="grain">grain</label>
+              <input type="range" id="grain" min="0" max="1.2" step="0.02" value="0.3"><output id="grainOut">0.3</output></div>
+            <label class="check"><input type="checkbox" id="hairLayer"> hair on its own layer, standing proud of the skull</label>
+            <label class="check"><input type="checkbox" id="ears" checked> ears</label>
+            <div class="btns"><button id="reseedBtn">Different grain</button></div>
           </div>
-          <div id="grid"></div>
-        </div>
-
-        <div id="style" hidden>
-          <h2>How many pixels</h2>
-          <div class="seg" id="sizes"></div>
-          <div class="hint" id="sizeNote"></div>
-
-          <h2>Build</h2>
-          <div class="seg" id="buildSeg">
-            <button data-slim="0">Classic arms</button>
-            <button data-slim="1">Slim arms</button>
-          </div>
-
-          <h2>Colours</h2>
-          <div class="hint">Taken off the photograph where it could be. Tick one to
-            choose it yourself — for a head-and-shoulders shot, the trousers and the
-            shoes were never in the picture and have been invented.</div>
-          <div id="swatches"></div>
-
-          <h2>From the photograph</h2>
-          <label class="check"><input type="checkbox" id="photoBody" checked>
-            take the clothes off the photograph, not off a swatch</label>
-          <div class="hint">With this on, the shirt in the picture — its print, its
-            stripes, the way the light falls off the shoulder — is sampled onto the
-            body, the arms and the legs, exactly as the face is. Whatever fell outside
-            the photograph keeps the plain version underneath.</div>
-
-          <h2>Cloth</h2>
-          <div class="row"><label for="sleeve">sleeve length</label>
-            <input type="range" id="sleeve" min="0" max="12" step="1" value="8"><output id="sleeveOut">8</output></div>
-          <div class="row"><label for="boot">boot height</label>
-            <input type="range" id="boot" min="0" max="12" step="1" value="3"><output id="bootOut">3</output></div>
-
-          <h2>The look of it</h2>
-          <div class="row"><label for="shading">shading</label>
-            <input type="range" id="shading" min="0" max="1.4" step="0.02" value="0.55"><output id="shadingOut">0.55</output></div>
-          <div class="row"><label for="grain">grain</label>
-            <input type="range" id="grain" min="0" max="1.2" step="0.02" value="0.3"><output id="grainOut">0.3</output></div>
-          <label class="check"><input type="checkbox" id="hairLayer"> hair on its own layer, standing proud of the skull</label>
-          <label class="check"><input type="checkbox" id="ears" checked> ears</label>
-          <div class="btns"><button id="reseedBtn">Different grain</button></div>
-        </div>
+        </template>
       </section>
 
       <!-- ============================ PAINT ============================ -->

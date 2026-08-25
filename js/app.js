@@ -39,7 +39,7 @@ const S = {
   base: null,          // an imported skin, when there is no photograph
   edits: new Map(),    // every texel laid by hand: "x,y" -> [r,g,b,a]
   pal: null,
-  poseMode: 'walk',
+  poseMode: 'idle',
   spin: false,
   modelPaint: false,
   name: 'my-skin',
@@ -94,10 +94,68 @@ function fitStage() {
 new ResizeObserver(fitStage).observe(stage);
 fitStage();
 
+/**
+ * Where he is looking.
+ *
+ * The pointer, wherever it is on the page — and worked out properly rather
+ * than by mapping the mouse's x to a yaw, because the figure turns. A point
+ * is unprojected from the cursor into the world, the direction from his head
+ * to that point is taken, and the head is aimed along it; so when you spin
+ * him round to look at his back, he keeps watching you over his shoulder
+ * instead of snapping to some fixed screen direction.
+ *
+ * Eased rather than snapped. A head that arrives instantly reads as a
+ * mechanism; one that takes a fifth of a second reads as attention.
+ */
+// Where he looks when nothing is asking him to look anywhere: level, at the
+// viewer. Screen centre is his CHEST — the camera frames the whole figure —
+// so resting the gaze there has him studying his own shirt.
+const REST = new THREE.Vector2(0, 0.42);
+const gaze = { want: REST.clone(), at: REST.clone(), on: true };
+const gazePoint = new THREE.Vector3();
+const headAt = new THREE.Vector3();
+
+addEventListener('pointermove', (e) => {
+  const r = renderer.domElement.getBoundingClientRect();
+  gaze.want.set(
+    ((e.clientX - r.left) / r.width) * 2 - 1,
+    -((e.clientY - r.top) / r.height) * 2 + 1,
+  );
+});
+// the pointer gone from the window is not the pointer at the top left corner
+addEventListener('pointerout', (e) => { if (!e.relatedTarget) gaze.want.copy(REST); });
+addEventListener('blur', () => gaze.want.copy(REST));
+
+function aimHead() {
+  if (!gaze.on || !fig.parts.head) return;
+  gaze.at.lerp(gaze.want, 0.16);
+  // Along the cursor's ray, at ROUGHLY THE FIGURE'S OWN DISTANCE. Unproject
+  // to any old depth and the point ends up far down the view axis, where the
+  // corner of the screen and the middle of it are nearly the same direction
+  // — and he stares straight ahead however far the pointer moves.
+  gazePoint.set(gaze.at.x, gaze.at.y, 0.5).unproject(camera)
+    .sub(camera.position).normalize().multiplyScalar(view.state.dist * 0.85)
+    .add(camera.position);
+  fig.parts.head.joint.getWorldPosition(headAt);
+  const dx = gazePoint.x - headAt.x;
+  const dy = gazePoint.y - headAt.y;
+  const dz = gazePoint.z - headAt.z;
+  const flat = Math.hypot(dx, dz) || 1e-4;
+  // he faces -Z, so a yaw of nought already looks the way -Z points
+  let yaw = Math.atan2(-dx, -dz);
+  while (yaw > Math.PI) yaw -= Math.PI * 2;
+  while (yaw < -Math.PI) yaw += Math.PI * 2;
+  const pitch = -Math.atan2(dy, flat);
+  const clamp = (v, m) => (v < -m ? -m : v > m ? m : v);
+  fig.parts.head.joint.rotation.y = clamp(yaw, 1.15);
+  fig.parts.head.joint.rotation.x = clamp(pitch * 0.85, 0.45);
+}
+
 let t0 = performance.now();
 renderer.setAnimationLoop(() => {
   const t = (performance.now() - t0) / 1000;
   pose(fig, t, S.poseMode);
+  aimHead();
   if (S.spin) { view.state.spin += 0.012; view.apply(); }
   renderer.render(scene, camera);
 });
@@ -230,6 +288,7 @@ $('tilt').oninput = (e) => {
 
 function slider(id, key, fmt) {
   const el = $(id), out = $(`${id}Out`);
+  if (!el) return null;
   el.value = S.opts[key];
   const show = () => { out.textContent = fmt ? fmt(+el.value) : String(+el.value); };
   show();
@@ -247,13 +306,8 @@ for (const [id, key] of [
   ['shiftX', 'shiftX'], ['shiftY', 'shiftY'],
   ['bright', 'bright'], ['contrast', 'contrast'], ['satur', 'satur'],
   ['warmth', 'warmth'], ['detail', 'detail'], ['features', 'features'],
-  ['shading', 'shading'], ['grain', 'grain'], ['sleeve', 'sleeve'], ['boot', 'boot'],
 ]) slider(id, key);
 slider('levels', 'levels', (v) => (v ? String(v) : 'off'));
-
-$('hairLayer').onchange = (e) => { S.opts.hairLayer = e.target.checked; queueRebuild(); keepPrefs(); };
-$('ears').onchange = (e) => { S.opts.ears = e.target.checked; queueRebuild(); keepPrefs(); };
-$('reseedBtn').onclick = () => { S.opts.seed = (Math.random() * 1e6) | 0; rebuild(); };
 
 /**
  * How finely the whole skin is painted.
@@ -292,11 +346,13 @@ function setSize(n) {
   painter.fit();
   drawSizes();
   fillParts();
+  refreshTwigs();
   keepPrefs();
 }
 
 function drawSizes() {
   const host = $('sizes');
+  if (!host) return;                 // the Style branch is not open
   host.textContent = '';
   for (const n of SIZES) {
     const b = document.createElement('button');
@@ -305,7 +361,7 @@ function drawSizes() {
     b.onclick = () => setSize(n);
     host.appendChild(b);
   }
-  $('sizeNote').textContent = S.skin.size === BASE
+  if ($('sizeNote')) $('sizeNote').textContent = S.skin.size === BASE
     ? 'A face eight pixels across. The only size vanilla Java takes.'
     : `A face ${S.skin.size / 8} pixels across. Bedrock skin packs take this; `
       + 'vanilla Java does not, so the export offers a 64×64 as well.';
@@ -326,8 +382,14 @@ function setSlim(slim) {
 $('slimBtn').onclick = () => setSlim(!S.opts.slim);
 
 $('poseBtn').onclick = () => {
-  S.poseMode = S.poseMode === 'walk' ? 'idle' : S.poseMode === 'idle' ? 'still' : 'walk';
-  $('poseBtn').textContent = S.poseMode === 'walk' ? 'walking' : S.poseMode === 'idle' ? 'standing' : 'still';
+  S.poseMode = S.poseMode === 'idle' ? 'walk' : S.poseMode === 'walk' ? 'still' : 'idle';
+  $('poseBtn').textContent = S.poseMode === 'walk' ? 'walking'
+    : S.poseMode === 'idle' ? 'standing' : 'still';
+};
+$('lookBtn').onclick = (e) => {
+  gaze.on = !gaze.on;
+  e.target.classList.toggle('on', gaze.on);
+  if (!gaze.on) fig.parts.head.joint.rotation.set(0, 0, 0);
 };
 $('spinBtn').onclick = (e) => { S.spin = !S.spin; e.target.classList.toggle('on', S.spin); };
 $('frontBtn').onclick = () => view.reset();
@@ -355,6 +417,7 @@ const WHENCE = {
 
 function drawSwatches() {
   const host = $('swatches');
+  if (!host) return;                 // the Style branch is not open
   host.textContent = '';
   for (const [key, label] of SWATCH_ROWS) {
     const chosen = S.opts.colours[key];
@@ -612,7 +675,7 @@ $('toMcBtn').onclick = () => {
   S.pal = null;
   refresh();
   drawSwatches();
-  drawCats();
+  refreshTwigs();
   showTab('paint');
   say('builtSay',
     `made — neck at ${L.neck}, hips at ${L.hip} of ${L.height} cubes tall`, 'good');
@@ -656,10 +719,15 @@ function thumbFor(cat, it) {
   if (had) return had;
   const s = new Skin(BASE);
   const wear = { ...S.opts.wear, [cat.key]: it.id };
-  // the neighbouring categories are cleared, or a hat sits on every haircut
+  // Whatever would COVER the thing being chosen comes off first. A hood is
+  // outerwear and it sits on the head, so a coat left on turns fifty
+  // haircuts into fifty identical hoods — which is exactly what it did.
+  if (cat.shows === 'head') wear.outer = 'none';
   if (cat.key === 'hair') { wear.headwear = 'none'; wear.face = 'none'; }
+  if (cat.key === 'headwear') wear.face = 'none';
   if (cat.key === 'top') { wear.outer = 'none'; wear.back = 'none'; }
   if (cat.key === 'bottom') wear.footwear = 'none';
+  if (cat.key === 'gloves') wear.outer = 'none';
   blank(s, {
     ...S.opts, size: BASE, wear, grain: 0.12,
     colours: {
@@ -679,108 +747,218 @@ function thumbFor(cat, it) {
   return url;
 }
 
-function drawCats() {
-  const host = $('cats');
+/**
+ * The wardrobe, as a tree.
+ *
+ * Every category is a branch you open in place rather than a page you go to
+ * and come back from — so a haircut and a hat can be open at once, and
+ * choosing between them does not mean two taps of navigation each time. What
+ * is open is remembered, because the thing you were fiddling with is the
+ * thing you want to still be fiddling with after a rebuild.
+ */
+const openBranches = new Set(['hair']);
+
+function drawTree() {
+  const host = $('tree');
   host.textContent = '';
-  const row = (name, note, onclick) => {
-    const b = document.createElement('button');
-    const t = document.createElement('i');
-    t.style.fontStyle = 'normal';
-    t.textContent = name;
-    const n = document.createElement('span');
-    n.textContent = note;
-    b.append(t, n);
-    b.onclick = onclick;
-    host.appendChild(b);
-  };
-  row('Style', `${S.skin.size}px · ${S.opts.slim ? 'slim' : 'classic'}`, () => openStyle());
+  host.appendChild(branch({
+    key: '__style',
+    name: 'Style',
+    value: () => `${S.skin.size}px · ${S.opts.slim ? 'slim' : 'classic'}`,
+    body: styleBody,
+  }));
   for (const cat of CATEGORIES) {
-    const id = (S.opts.wear || {})[cat.key];
+    host.appendChild(branch({
+      key: cat.key,
+      name: cat.name,
+      cat,
+      value: () => {
+        const id = (S.opts.wear || {})[cat.key];
+        if (!id || id === 'auto') return 'from the photo';
+        const it = cat.items.find((x) => x.id === id);
+        return it ? it.name : 'none';
+      },
+      body: () => rackBody(cat),
+    }));
+  }
+}
+
+function branch(spec) {
+  const wrap = document.createElement('div');
+  wrap.className = `branch${openBranches.has(spec.key) ? ' open' : ''}`;
+  wrap.dataset.key = spec.key;
+
+  const head = document.createElement('button');
+  head.className = 'twig';
+  const caret = document.createElement('span');
+  caret.className = 'caret';
+  caret.textContent = '\u25B8';
+  const nm = document.createElement('span');
+  nm.className = 'nm';
+  nm.textContent = spec.name;
+  const val = document.createElement('span');
+  val.className = 'val';
+  val.textContent = spec.value();
+  head.append(caret, nm, val);
+  if (spec.cat) {
+    const dot = document.createElement('span');
+    dot.className = 'swatchdot';
+    dot.style.background = rgbOf(spec.cat.colour) || EXTRA_COLOURS[spec.cat.colour] || '#888';
+    head.appendChild(dot);
+  }
+
+  const leafy = document.createElement('div');
+  leafy.className = 'leafy';
+
+  head.onclick = () => {
+    const open = wrap.classList.toggle('open');
+    if (open) {
+      openBranches.add(spec.key);
+      if (!leafy.childElementCount) leafy.appendChild(spec.body());
+    } else {
+      openBranches.delete(spec.key);
+    }
+  };
+  if (openBranches.has(spec.key)) leafy.appendChild(spec.body());
+
+  wrap.append(head, leafy);
+  return wrap;
+}
+
+/** Refresh only the little grey labels, without closing anything. */
+function refreshTwigs() {
+  for (const wrap of document.querySelectorAll('#tree .branch')) {
+    const key = wrap.dataset.key;
+    const val = wrap.querySelector('.val');
+    const dot = wrap.querySelector('.swatchdot');
+    if (key === '__style') {
+      val.textContent = `${S.skin.size}px · ${S.opts.slim ? 'slim' : 'classic'}`;
+      continue;
+    }
+    const cat = CATEGORIES.find((c) => c.key === key);
+    if (!cat) continue;
+    const id = (S.opts.wear || {})[key];
     const it = cat.items.find((x) => x.id === id);
-    const note = !id || id === 'auto' ? 'from the photo' : (it ? it.name : 'none');
-    row(cat.name, note, () => openRack(cat.key));
+    val.textContent = !id || id === 'auto' ? 'from the photo' : (it ? it.name : 'none');
+    if (dot) dot.style.background = rgbOf(cat.colour) || EXTRA_COLOURS[cat.colour] || '#888';
   }
 }
 
-let openCat = null;
-
-function openStyle() {
-  openCat = null;
-  $('cats').hidden = true;
-  $('rack').hidden = true;
-  $('style').hidden = false;
-  drawSizes();
-  drawSwatches();
-  for (const b of document.querySelectorAll('#buildSeg button')) {
-    b.classList.toggle('on', (b.dataset.slim === '1') === !!S.opts.slim);
-  }
+function styleBody() {
+  const node = $('styleTpl').content.firstElementChild.cloneNode(true);
+  // the controls inside are wired by id, so they have to be in the document
+  // before anything looks for them
+  // a timer rather than an animation frame: frames do not tick in a hidden
+  // tab or in a headless check, and a control that is only wired up when
+  // something happens to repaint is a control that is sometimes dead
+  setTimeout(() => {
+    wireStyle();
+    drawSizes();
+    drawSwatches();
+  }, 0);
+  return node;
 }
 
-function openRack(key) {
-  const cat = CATEGORIES.find((c) => c.key === key);
-  if (!cat) return;
-  openCat = cat;
-  $('cats').hidden = true;
-  $('style').hidden = true;
-  $('rack').hidden = false;
-  $('rackName').textContent = cat.name;
-  const colour = $('rackColour');
+function rackBody(cat) {
+  const wrap = document.createElement('div');
+  const bar = document.createElement('div');
+  bar.className = 'rackbar';
+  const note = document.createElement('span');
+  note.textContent = `${cat.items.length} to choose from`;
+  const colour = document.createElement('input');
+  colour.type = 'color';
+  colour.title = 'colour';
   colour.value = rgbOf(cat.colour) || EXTRA_COLOURS[cat.colour] || '#888888';
   colour.oninput = () => {
     S.opts.colours[cat.colour] = colour.value;
     rebuild();
-    drawGrid();
+    fillGrid(grid, cat);
+    refreshTwigs();
     keepPrefs();
   };
-  drawGrid();
+  bar.append(note, colour);
+  const grid = document.createElement('div');
+  grid.className = 'grid';
+  wrap.append(bar, grid);
+  fillGrid(grid, cat);
+  return wrap;
 }
 
-function closeRack() {
-  openCat = null;
-  $('rack').hidden = true;
-  $('style').hidden = true;
-  $('cats').hidden = false;
-  drawCats();
-}
-
-function drawGrid() {
-  const cat = openCat;
-  const host = $('grid');
-  host.textContent = '';
-  if (!cat) return;
+/**
+ * Fill one rack.
+ *
+ * The pictures are built a few at a time across animation frames rather than
+ * all at once. Fifty haircuts is fifty little skins generated and drawn, and
+ * done in one go that is half a second in which nothing on the page responds
+ * — which reads as the app having crashed rather than as it thinking.
+ */
+function fillGrid(grid, cat) {
+  grid.textContent = '';
   const chosen = (S.opts.wear || {})[cat.key];
   const list = [...cat.items];
-  // "from the photo" only means anything where the photograph had an answer
   if (['top', 'bottom', 'footwear', 'hair'].includes(cat.key)) {
     list.unshift({ id: 'auto', name: 'From the photo' });
   }
-  for (const it of list) {
+  const cells = list.map((it) => {
     const cell = document.createElement('div');
     cell.className = `wear${it.id === chosen ? ' on' : ''}`;
     const img = document.createElement('img');
     img.alt = it.name;
-    img.src = it.id === 'auto' ? thumbFor(cat, { id: 'auto', draw: null }) : thumbFor(cat, it);
+    img.width = 64;
+    img.height = 64;
     const b = document.createElement('b');
     b.textContent = it.name;
     cell.append(img, b);
     cell.onclick = () => {
       S.opts.wear = { ...S.opts.wear, [cat.key]: it.id };
       rebuild();
-      drawGrid();
+      for (const other of grid.children) other.classList.remove('on');
+      cell.classList.add('on');
+      refreshTwigs();
       keepPrefs();
     };
-    host.appendChild(cell);
-  }
+    grid.appendChild(cell);
+    return { it, img };
+  });
+  // A token rather than `grid.isConnected`: this runs while the rack is still
+  // being BUILT, before it has been put in the document, so "is it attached"
+  // is false on the first pass and the loop stops after five pictures. The
+  // token answers the question actually being asked — is this still the fill
+  // that grid wants, or has something refilled it since.
+  const token = String(Date.now()) + Math.random();
+  grid.dataset.fill = token;
+  let i = 0;
+  const chunk = () => {
+    if (grid.dataset.fill !== token) return;
+    const until = Math.min(i + 5, cells.length);
+    for (; i < until; i++) cells[i].img.src = thumbFor(cat, cells[i].it);
+    if (i < cells.length) setTimeout(chunk, 0);
+  };
+  chunk();
 }
 
-$('backCats').onclick = closeRack;
-for (const b of document.querySelectorAll('#buildSeg button')) {
-  b.onclick = () => {
-    setSlim(b.dataset.slim === '1');
-    for (const o of document.querySelectorAll('#buildSeg button')) o.classList.toggle('on', o === b);
-  };
+let styleWired = false;
+function wireStyle() {
+  if (styleWired || !$('photoBody')) return;
+  styleWired = true;
+  for (const [id, key] of [['sleeve', 'sleeve'], ['boot', 'boot'],
+    ['shading', 'shading'], ['grain', 'grain']]) slider(id, key);
+  $('hairLayer').onchange = (e) => { S.opts.hairLayer = e.target.checked; queueRebuild(); keepPrefs(); };
+  $('ears').onchange = (e) => { S.opts.ears = e.target.checked; queueRebuild(); keepPrefs(); };
+  $('reseedBtn').onclick = () => { S.opts.seed = (Math.random() * 1e6) | 0; rebuild(); };
+  $('photoBody').onchange = (e) => { S.opts.photoBody = e.target.checked; rebuild(); keepPrefs(); };
+  $('photoBody').checked = S.opts.photoBody !== false;
+  $('hairLayer').checked = !!S.opts.hairLayer;
+  $('ears').checked = S.opts.ears !== false;
+  for (const b of document.querySelectorAll('#buildSeg button')) {
+    b.classList.toggle('on', (b.dataset.slim === '1') === !!S.opts.slim);
+    b.onclick = () => {
+      setSlim(b.dataset.slim === '1');
+      for (const o of document.querySelectorAll('#buildSeg button')) o.classList.toggle('on', o === b);
+      refreshTwigs();
+    };
+  }
 }
-$('photoBody').onchange = (e) => { S.opts.photoBody = e.target.checked; rebuild(); keepPrefs(); };
 
 // ---------------------------------------------------------------------------
 // the painter
@@ -935,7 +1113,7 @@ function showTab(which) {
   for (const b of document.querySelectorAll('#tabs button')) b.classList.toggle('on', b.dataset.tab === which);
   for (const p of document.querySelectorAll('.panel')) p.classList.toggle('on', p.dataset.panel === which);
   if (which === 'paint') requestAnimationFrame(() => { sizeBoards(); painter.fit(); });
-  if (which === 'wear') { closeRack(); }
+  if (which === 'wear') refreshTwigs();
   if (which === 'photo') requestAnimationFrame(() => { sizeBoards(); cropper.fit(); cropper.draw(); });
 }
 for (const b of document.querySelectorAll('#tabs button')) b.onclick = () => showTab(b.dataset.tab);
@@ -1065,6 +1243,7 @@ $('skinIn').onchange = async (e) => {
     painter.fit();
     drawSizes();
     drawSwatches();
+    refreshTwigs();
     say('saveSay', 'opened — paint away', 'good');
   } catch (err) {
     say('saveSay', err.message || 'could not read that', 'bad');
@@ -1110,6 +1289,7 @@ function drawShelf() {
       painter.fit();
       drawSizes();
       drawSwatches();
+      refreshTwigs();
       say('saveSay', `opened ${row.name}`, 'good');
     };
     card.append(img, b, x);
@@ -1134,15 +1314,12 @@ function loadPrefs() {
       wear: { ...DEFAULT_WEAR, ...(p.opts.wear || {}) },
     };
   }
-  $('photoBody').checked = S.opts.photoBody !== false;
   if (SIZES.includes(S.opts.size) && S.opts.size !== S.skin.size) {
     S.skin.resize(S.opts.size);
     painter.size = S.opts.size;
   }
   $('slimBtn').textContent = S.opts.slim ? 'slim arms' : 'classic arms';
   $('slimBtn').classList.toggle('on', S.opts.slim);
-  $('hairLayer').checked = !!S.opts.hairLayer;
-  $('ears').checked = S.opts.ears !== false;
   for (const id of ['eyeRow', 'mouthRow', 'zoomX', 'shiftX', 'shiftY', 'bright', 'contrast',
     'satur', 'warmth', 'detail', 'features', 'shading', 'grain', 'sleeve', 'boot', 'levels']) {
     const el = $(id);
@@ -1159,8 +1336,7 @@ function loadPrefs() {
 
 loadPrefs();
 painter.slim = S.opts.slim;
-drawSizes();
-drawCats();
+drawTree();
 fillParts();
 rebuildFigure();
 sizeBoards();
@@ -1193,7 +1369,11 @@ Object.assign(window, {
     return { ...S.opts.wear };
   },
   __cats: () => CATEGORIES.map((c) => ({ key: c.key, n: c.items.length })),
-  __openCat: (k) => (k ? openRack(k) : closeRack()),
+  __openCat: (k) => {
+    const wrap = document.querySelector(`#tree .branch[data-key="${k}"]`);
+    if (wrap && !wrap.classList.contains('open')) wrap.querySelector('.twig').click();
+    return !!wrap;
+  },
   __cap: cap,
   async __shot(key, url) {
     cap.wanted = key;
@@ -1225,6 +1405,10 @@ Object.assign(window, {
     view.state.spin = 0;
     view.apply();
     pose(fig, 0, 'still');
+    // the loop aims his head after posing it; a hook that skips that draws a
+    // different figure from the one on screen, which is the one thing a test
+    // hook must never do
+    aimHead();
     S.skin.flush();
     texture.needsUpdate = true;
     renderer.render(scene, camera);

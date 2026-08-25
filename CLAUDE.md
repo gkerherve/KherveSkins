@@ -213,11 +213,34 @@ Two rules that are easy to get wrong:
   photograph's hair out first. Without it "Shaved" is not shaved and every
   style in the grid looks identical, because underneath it is.
 
+`js/cloth.js` is what makes a garment look like a garment rather than a
+colour swatch, and it is four things, each one line of arithmetic: the WEAVE
+(denim streaks, knit grain, leather speckle, a bright band down metal), the
+LIGHT (darker at the hem than the shoulder, and a torso curves away at its
+sides), the PRINT (stripes and plaid are a second COLOUR, not a shade of the
+first, because that is what dye does) and the EDGES (a hem, a cuff, a collar
+and a seam are one line of pixels each, and are most of what tells a jumper
+from a t-shirt at forty pixels).
+
+Hair gets the same treatment under a different name: vertical strands of two
+or three tones, a highlight at the crown, roots a shade darker than the ends.
+Without it every dark haircut is the same brown hat.
+
 `js/doll.js` draws the thumbnails, and the head is drawn as a BOX rather than
 a square on purpose: a bob and a crew cut have the same front face, and a cap
 and a beanie have the same band — what separates them is the sides and the
 top. Drawn flat, half the wardrobe is twenty identical brown rectangles,
 which is exactly what the first version of that grid looked like.
+
+Two traps in the rack UI, both found the hard way:
+
+- **`fillGrid` runs before the grid is in the document**, so guarding the
+  chunked loader with `grid.isConnected` stops it after the first five
+  pictures. It is guarded with a token instead — which answers the question
+  actually being asked, "is this still the fill that grid wants".
+- **Whatever would COVER the thing being chosen comes off first.** A hood is
+  outerwear and it sits on the head, so a coat left on turns fifty haircuts
+  into fifty identical hoods.
 
 ## The body, not just the head
 
@@ -260,6 +283,7 @@ asking anybody to look:
 | `__texel(x, y)` | read the image |
 | `__size(n)` | change the resolution, or ask what it is |
 | `__wear(cat, id)` | put something on, or ask what is on |
+| `__render(...)` | draws one frame — and aims his head, exactly as the loop does |
 | `__openCat(key)` | open one rack of the wardrobe, or go back to the list |
 | `__shot(key, url)` | hand the capture one of its five photographs |
 | `__build()` | carve, and say how many cubes survived |

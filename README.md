@@ -4,7 +4,8 @@ Turn a photograph into a Minecraft skin.
 
 Show it a picture of somebody, and it hands you the 64×64 PNG Minecraft wants
 — a whole character, front and back, hair, clothes and shoes — with a live
-figure walking beside it so you can see what you are actually making. Then
+figure standing beside it — watching your pointer — so you can see what you
+are actually making. Then
 adjust everything, or paint on it texel by texel.
 
 One page of plain JavaScript. **No build step, no npm, nothing to install**,
@@ -91,12 +92,18 @@ the slider changes is how much it commits to them.
 
 ![the wardrobe](docs/wardrobe.png)
 
-**Wear.** The wardrobe, laid out the way Minecraft's own is: a list of
-categories — Hair, Tops, Bottoms, Outerwear, Headwear, Gloves, Footwear, Face
-Items, Back Items — and a grid of things inside each one, each drawn on a
-little figure in *your* colours so choosing between two of them is a fair
-comparison. A hundred and twenty-five items, every one generated rather than
-stored, so they fit any resolution and any palette.
+**Wear.** The wardrobe, laid out the way Minecraft's own is, as a **tree**:
+Hair, Tops, Bottoms, Outerwear, Headwear, Gloves, Footwear, Face Items, Back
+Items. Tap a heading to open it in place — more than one can be open at once,
+and they stay how you leave them. Inside each is a grid of things, every one
+drawn on a little figure in *your* colours so choosing between two of them is
+a fair comparison.
+
+**Two hundred and forty-four items**, every one generated rather than stored,
+so they fit any resolution and any palette. Fifty haircuts; thirty-five tops;
+denim that streaks, knit that has a grain, leather that speckles, metal with
+a highlight down it; plaid and tartan and camouflage and argyle; hems, cuffs,
+collars, seams, laces and buttons.
 
 Each category has a colour of its own, and the three the photograph can
 actually answer — hair, top, bottom, footwear — start on **From the photo**,
