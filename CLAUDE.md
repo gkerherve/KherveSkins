@@ -186,6 +186,21 @@ shot thumbnails show the silhouette**, room dimmed and person lit. A capture
 that has gone wrong is invisible in the photograph and obvious the moment you
 see what was taken to be a person.
 
+**Which way the camera is, in the volume's own axes, is (−sin a, 0, −cos a) —
+both signs negative.** `paint` gives each surface cube the colour of the camera
+most nearly looking AT it, so an x-sign that is wrong hands every cube on his
+left the colour of the camera pointed at his right, and the figure comes back
+with its two sides swapped. Nothing symmetrical can show it, which is why it
+stood for as long as it did.
+
+It is settled by measurement, not by argument. `tools/make_test_room9.py
+--mark` paints his right arm red and his left blue; in the FRONT photograph the
+red one lands on the LEFT of the frame, which is what "his right" means and
+needs no convention to state. At 90° only the red arm is visible. So 90° sees
+his right side, which is the low end of x, which is (−1, 0, 0). Counted over
+the marked head: **248 marker cubes on the correct side and 8 wrong with the
+right sign; 67 right and 105 wrong with the old one** — worse than a coin.
+
 **Normalise every view on the MEDIAN height, not on its own.** The camera did
 not move and the person did not grow, so they are the same height in every
 shot; any disagreement is an outline that caught a shadow or lost a foot. A
@@ -211,6 +226,47 @@ time, and one toggle fixes it either way.
 Verified at 4, 5, 10 and 20 photographs, handed in starting from the back:
 every angle recovered exactly, direction included.
 
+**Everything that looks for a body part looks for a SHAPE, never for a
+fraction of the frame.** This is the rule the capture kept breaking, in three
+places, and all three failed on the same photographs: a head-and-shoulders
+portrait, which is what somebody hands the program when they want a FACE.
+
+- `headOf` took "the narrowest row in the top third" for the neck. In a
+  standing figure the neck is an eighth of the way down; in a portrait it is
+  halfway, and the search never reached it. Now `neckRow` walks down and takes
+  the first row much narrower than the widest thing above it that widens again
+  below — a pinch, wherever it sits. It lands at an eighth on a standing figure
+  and a half on a portrait, and it cannot run on to the waist or to the gap
+  between the ankles, because the neck comes first.
+- `faceScore` counted skin over "the top sixth of the outline". On a portrait
+  that is scalp; on somebody with their hair up it is the bun. The score was
+  hair either way and the offset was rounding error — and the offset is what
+  decides WHICH WAY the person turned, so the answer was a mirror image of them
+  chosen by noise. It now measures inside the head band, over the lower
+  two-thirds of it, which is eyes to chin at any framing.
+- The direction is only accumulated from views with real skin in them
+  (`score >= 0.08`). A view with four skin pixels has an offset, and the offset
+  is wherever those four pixels fell.
+
+**And a row's width is its outline edge to edge, never its pixel count.** A
+mask is never solid — a dark eye against a dark doorway, a shadow under a chin,
+a pair of glasses, any of them come out as room and leave a hole. Counted, a
+row with two eyes punched out of it is narrow, and narrow is what a neck looks
+like. Measured edge to edge a hole changes nothing. The symptom: three views of
+a figure reporting a head thirty pixels tall and the other five reporting a
+hundred and twenty, and the three were exactly the ones with eyes in them.
+
+**The program works out the FRAMING and acts on it.** A standing figure is
+seven heads tall so its head is an eighth of the outline; a portrait is a third
+or more. Past a quarter there is no body in the photograph, "just the head"
+ticks itself, and it says so — because the alternative is a Minecraft man whose
+legs were measured off a chin. Touch the box and it stops guessing.
+
+**A plate of a different shape is not a plate.** Every pixel is compared with
+the wrong pixel, the whole frame comes back as a person, and the carve is a
+solid block with nothing on screen to say why. One line to catch, and it cost
+an hour of believing a bug that was a stale file.
+
 **Four turns is the minimum and eight is the point.** With four, every
 cross-section of the hull is a square, so shoulders come out with corners on
 them — visible the moment you turn it 45 degrees. Past seven views a cube is
@@ -230,6 +286,15 @@ Three more things that cost time and would cost it again:
   beside an ear; both read as the carve having failed when it mostly worked.
   Fill anything with company on five sides, drop anything with company on
   fewer than two.
+- **A symmetrical fixture cannot test which way round anything is.** The test
+  head was a full-width skin box under a hair cap, so its two profiles were
+  identical and every left-right check quietly passed — through a swapped
+  camera normal and two reversed profile squares. It is now a proper head: the
+  face is skin, the back of it is hair, and the boundary between them is worked
+  out from the projection rather than faked per angle. `--mark` paints his
+  right arm red and his left blue; `--portrait` reframes to head and shoulders,
+  puts the hair up in a bun and marks the cheeks. Between them, every claim
+  above is a number rather than an opinion.
 - **A test figure must be a rigid 3D OBJECT.** The room figure was drawn
   per-angle, which is not the projection of anything — with four views the
   inconsistency hid in the slack and with twenty it carved the legs clean off,
@@ -269,6 +334,18 @@ Going through the hull instead averages the photographs into cubes and then
 the cubes into texels, and every averaging is a blur a sixteen-pixel face
 cannot spare. So the hull is still built — it is what you spin, and it is how
 the head's own proportions are known — and `facesFromViews` ignores it.
+
+**A profile square is reversed and the flat ones are not.** A photograph runs
+left to right; a square of the head runs whichever way `fit.js` says. On the
+FRONT square the first texel is his right, on the BACK his left, and on either
+SIDE square the first texel is his FACE and the last is the back of his head.
+Work each against the projection — across is dx·cos a − dz·sin a, his right is
+low x, his front is low z — and the two flat squares read the same way as the
+picture while both profiles read backwards. Sampled straight in, every side
+view came out with the hair at the front and the face round the back of the
+ear: on a real head that is hard to see and impossible to unsee.
+
+![the four head squares, and the man wearing them](docs/sides.png)
 
 The parts of that which cost time:
 

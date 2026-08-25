@@ -90,6 +90,13 @@ shadow does not change what colour the floor is, only how much light comes off
 it. Without that the outline grows a foot of floor, and since every view is
 scaled on the height of its outline, one shadow mis-scales the lot.
 
+Everything it needs to know about the photographs it works out from their
+SHAPE and never from a fraction of the frame — where the neck is, which way
+you were facing, which way round you turned. Hair up in a bun, standing back,
+right up close: same answers. It also checks the empty-room shot is the same
+shape as the turns, because a plate from a different camera compares every
+pixel with the wrong one and hands back a solid block.
+
 Each shot's thumbnail shows you **what it found** — room dimmed, person lit —
 so a capture that has gone wrong is a glance rather than a mystery.
 
@@ -114,6 +121,13 @@ so the whole grid lands on the part anybody recognises: **about fifty cubes
 across a face instead of ten**, from exactly the pictures you already gave it.
 The body keeps whatever it already had, so a head from photographs can sit on
 a wardrobe you dressed by hand.
+
+**You do not have to say which sort of photographs they are.** A head-and-
+shoulders portrait has a head a third of the outline tall; somebody standing
+back has a head an eighth of it. The program measures that and ticks the box
+itself, because there is no body in a portrait to carve and pretending
+otherwise gives you a Minecraft man whose legs were guessed off his chin.
+Untick it and it stops guessing.
 
 It is also the better answer for a face, and not only the cheaper one. The
 six squares of the head are taken **straight from the photographs** — for
