@@ -1,0 +1,13 @@
+# verification renders, and anything else the app POSTs back at the server
+shots/
+
+__pycache__/
+*.pyc
+
+# editor / agent scratch
+.claude/
+.idea/
+.vscode/
+
+# the dev server, when it is started with its output redirected
+shots-server.log
