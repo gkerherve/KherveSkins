@@ -80,6 +80,18 @@ you in *all four* pictures. Land on the room even once and the cube was never
 there. What survives is you, in cubes — spin it, then press **Turn this into
 a Minecraft man**.
 
+Two things it does that make a real capture work rather than a staged one.
+The **empty-room** shot is exposure-matched to each frame before it is
+subtracted, because a phone re-meters between shots and a wall that comes back
+darker otherwise reads as a person — on a real set that put 87% of one picture
+inside the outline. And a **shadow** is told from a person by chromaticity: a
+shadow does not change what colour the floor is, only how much light comes off
+it. Without that the outline grows a foot of floor, and since every view is
+scaled on the height of its outline, one shadow mis-scales the lot.
+
+Each shot's thumbnail shows you **what it found** — room dimmed, person lit —
+so a capture that has gone wrong is a glance rather than a mystery.
+
 Every view is scaled on the **median** height of all of them rather than its
 own, which is what makes one duff photograph cost a little accuracy instead
 of most of the person: the same set with one shot taken from further back

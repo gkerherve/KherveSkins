@@ -75,6 +75,30 @@ export function landmarks(vol) {
   }
   if (tr < 0) { tl = Math.round(nx * 0.35); tr = Math.round(nx * 0.65); }
 
+  // ARMS DOWN, which is what people actually do.
+  //
+  // An arm touching a ribcage cannot be told from a ribcage by any outline,
+  // so the hull fuses them and the trunk comes out as wide as the whole
+  // person. Left alone, the body box then stretches over the arms as well
+  // and the Minecraft man is a barrel with no arms on it.
+  //
+  // The shoulders are still measurable even when the arms are not, so the
+  // split is put in by proportion: on the model a figure is sixteen wide with
+  // an eight-wide chest and a four-wide arm on each side, and a real person
+  // with their arms down is close enough to the same halves-and-quarters.
+  // Guessed arms in the right place beat a barrel, and the app says it
+  // guessed.
+  const chestY = Math.min(floor - 1, top + Math.round(H * 0.34));
+  const fullL = leftAt[chestY], fullR = rightAt[chestY];
+  const fullW = fullR < 0 ? 0 : fullR - fullL + 1;
+  let fusedArms = false;
+  if (fullW > 3 && (tr - tl + 1) >= fullW * 0.88) {
+    fusedArms = true;
+    const cut = Math.max(1, Math.round(fullW * 0.22));
+    tl = fullL + cut;
+    tr = fullR - cut;
+  }
+
   // The hips: the highest slice where the body forks into two legs.
   //
   // Counted only within the trunk's own columns, and that restriction is the
@@ -88,7 +112,7 @@ export function landmarks(vol) {
   }
 
   return {
-    top, floor, neck, shoulder, hip, height: H,
+    top, floor, neck, shoulder, hip, height: H, fusedArms,
     widthAt, leftAt, rightAt, countAt,
     torso: [tl, tr],
     armL: [tr + 1, Math.max(tr + 1, ...rightAt.slice(shoulder, hip))],
@@ -182,14 +206,20 @@ export function fitToSkin(skin, vol, opts = {}) {
   const mid = Math.round((tl + tr) / 2);
   const armTop = Math.min(L.shoulder + 1, L.hip - 1);
 
-  const beside = (x0, x1) => ({ x0, x1, z0: L.zBody ? L.zBody[0] : 0, z1: vol.nz - 1 });
+  // The legs are split down the middle of the LEGS, not of the torso. With
+  // the arms fused the torso has been narrowed to a guess, and cutting the
+  // legs at the middle of a guess puts both of them in one thigh — which
+  // renders as a man on a single post.
+  const legZone = extent(vol, L.hip, L.floor, 0, vol.nx - 1);
+  const legMid = legZone ? Math.round((legZone.x0 + legZone.x1) / 2) : mid;
+  const beside = (x0, x1) => ({ x0, x1, z0: 0, z1: vol.nz - 1 });
   const boxes = {
     head: extent(vol, L.top, L.neck, 0, vol.nx - 1),
     body: extent(vol, L.neck, L.hip, tl, tr),
     armR: extent(vol, armTop, L.hip, 0, tl - 1),
     armL: extent(vol, armTop, L.hip, tr + 1, vol.nx - 1),
-    legR: extent(vol, L.hip, L.floor, tl, mid),
-    legL: extent(vol, L.hip, L.floor, mid + 1, tr),
+    legR: legZone ? extent(vol, L.hip, L.floor, legZone.x0, legMid) : null,
+    legL: legZone ? extent(vol, L.hip, L.floor, legMid + 1, legZone.x1) : null,
   };
   // an arm the carve could not separate from the ribs: stand it where one
   // would be rather than leaving a hole
@@ -200,6 +230,7 @@ export function fitToSkin(skin, vol, opts = {}) {
   if (!boxes.head) boxes.head = { ...body };
   if (!boxes.legR) boxes.legR = { x0: tl, x1: mid, z0: body.z0, z1: body.z1 };
   if (!boxes.legL) boxes.legL = { x0: mid + 1, x1: tr, z0: body.z0, z1: body.z1 };
+  void beside;
 
   // the model's height, stretch by stretch, onto the carved body's own joins
   const anchors = [[32, L.top], [24, L.neck], [12, L.hip], [0, L.floor + 1]];

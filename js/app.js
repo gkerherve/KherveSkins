@@ -568,16 +568,47 @@ async function tookShot(file) {
   try {
     const img = await loadImage(file);
     const photo = new Photo(img);
-    const c = document.createElement('canvas');
-    c.width = 120; c.height = 160;
-    const cx = c.getContext('2d');
-    cx.drawImage(photo.canvas, 0, 0, c.width, c.height);
-    cap.shots[key] = { photo, thumb: c.toDataURL('image/png') };
+    cap.shots[key] = { photo, thumb: thumbOf(photo, null) };
     drawShots();
     checkShot(key);
+    // the plate arriving changes how every other shot is read, so they all
+    // have to be looked at again
+    if (key === 'plate') for (const k of Object.keys(cap.shots)) if (k !== 'plate') checkShot(k);
   } catch (e) {
     say('capSay', e.message || 'could not read that', 'bad');
   }
+}
+
+/**
+ * A thumbnail with the outline the program FOUND drawn on it.
+ *
+ * The single most useful thing in this tab. A capture that has gone wrong is
+ * invisible in the photograph and obvious the moment you see what was taken
+ * to be a person — a shadow at the feet, half a wall, a missing head. Without
+ * this, a bad carve is a mystery; with it, it is a glance.
+ */
+function thumbOf(photo, sil) {
+  const c = document.createElement('canvas');
+  c.width = 120; c.height = 160;
+  const cx = c.getContext('2d');
+  cx.drawImage(photo.canvas, 0, 0, c.width, c.height);
+  if (!sil) return c.toDataURL('image/png');
+  const img = cx.getImageData(0, 0, c.width, c.height);
+  for (let y = 0; y < c.height; y++) {
+    for (let x = 0; x < c.width; x++) {
+      const sx = Math.min(sil.mw - 1, Math.round(x * sil.mw / c.width));
+      const sy = Math.min(sil.mh - 1, Math.round(y * sil.mh / c.height));
+      if (sil.mask[sy * sil.mw + sx]) continue;
+      const k = (y * c.width + x) * 4;
+      // everything the program calls "room", greyed and dimmed
+      const g = (img.data[k] + img.data[k + 1] + img.data[k + 2]) / 3;
+      img.data[k] = g * 0.30 + 10;
+      img.data[k + 1] = g * 0.32 + 14;
+      img.data[k + 2] = g * 0.38 + 24;
+    }
+  }
+  cx.putImageData(img, 0, 0);
+  return c.toDataURL('image/png');
 }
 
 /**
@@ -595,6 +626,8 @@ function checkShot(key) {
   const plate = cap.shots.plate;
   const sil = silhouette(cap.shots[key].photo, plate ? plate.photo : null);
   cap.shots[key].sil = sil;
+  cap.shots[key].thumb = thumbOf(cap.shots[key].photo, sil);
+  drawShots();
   const frac = sil.h / cap.shots[key].photo.h;
   if (sil.area < 0.015) {
     say('capSay', 'cannot find you in that one — plainer background, or take the empty room first', 'bad');
@@ -602,8 +635,10 @@ function checkShot(key) {
     say('capSay', 'you are running off the top or bottom — stand further back', 'bad');
   } else if (frac < 0.45) {
     say('capSay', 'you are rather small in frame — closer, or turn the phone upright', '');
+  } else if (!plate) {
+    say('capSay', 'usable — but the empty room would make it much better', '');
   } else {
-    say('capSay', 'good — that one is usable', 'good');
+    say('capSay', 'good — the lit part of that thumbnail is what it found', 'good');
   }
 }
 
@@ -696,6 +731,10 @@ $('toMcBtn').onclick = () => {
     slim: S.opts.slim,
     skinTone: S.pal && S.pal.skin ? S.pal.skin : null,
   });
+  const armNote = L.fusedArms
+    ? ' — your arms were against your sides, so they have been placed by '
+      + 'proportion; hold them a little clear and they will be measured'
+    : '';
   S.base = S.skin.snapshot();
   S.pal = null;
   refresh();
@@ -703,7 +742,8 @@ $('toMcBtn').onclick = () => {
   refreshTwigs();
   showTab('paint');
   say('builtSay',
-    `made — neck at ${L.neck}, hips at ${L.hip} of ${L.height} cubes tall`, 'good');
+    `made — neck at ${L.neck}, hips at ${L.hip} of ${L.height} cubes tall${armNote}`,
+    L.fusedArms ? '' : 'good');
 };
 
 // ---------------------------------------------------------------------------

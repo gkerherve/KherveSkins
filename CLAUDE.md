@@ -154,6 +154,38 @@ a dimple, and with four views the cross-sections are square, which is why a
 45-degree view of the result looks boxier than the front. More views would
 round it; nothing else will.
 
+**Telling a person from a room is where nearly all the difficulty is**, and a
+real capture — a real room, a real phone — breaks three ways that a clean test
+room does not. All three were found by running actual photographs through it,
+and each one on its own is enough to ruin the carve:
+
+- **Exposure drift.** A phone re-meters between shots. A wall at 220 coming
+  back at 190 differs by ninety across three channels, which IS the whole
+  threshold — so on the darker frames the entire room registers as somebody
+  standing in it. Measured on a real set: one shot in eight came back with
+  **eighty-seven per cent of the picture marked as a person**. `exposureGain`
+  measures the drift on a ring round the frame edge (room in both pictures,
+  taken as a median so an elbow in the ring does not set the exposure) and
+  corrects the plate before differencing.
+- **Shadow.** The person throws one on the floor and it differs from the empty
+  room, so without help it IS the person, and the outline grows a foot of
+  floor — which then mis-scales every other view, since they are all scaled on
+  the height of the outline. Told apart by CHROMATICITY: a shadow does not
+  change what colour a wall is, only how much light comes off it. Measured on
+  the test room, a shadow moves chromaticity by about five thousandths, a pale
+  green shirt against a white door by fifty, bare skin by ninety. The line goes
+  in the gap and the gap is wide.
+- **Arms down**, which is what people actually do however clearly the card
+  asks otherwise. Handled in `fit.js`: if the trunk is as wide as the whole
+  silhouette at chest height the arms have fused, so they are placed by
+  proportion — halves and quarters, as the model itself is — and the app SAYS
+  it guessed.
+
+And the thing that makes all of this debuggable rather than mystifying: **the
+shot thumbnails show the silhouette**, room dimmed and person lit. A capture
+that has gone wrong is invisible in the photograph and obvious the moment you
+see what was taken to be a person.
+
 **Normalise every view on the MEDIAN height, not on its own.** The camera did
 not move and the person did not grow, so they are the same height in every
 shot; any disagreement is an outline that caught a shadow or lost a foot. A
@@ -205,6 +237,14 @@ happily and is wrong:
   sides make three runs across a slice from shoulder to wrist, so "how many
   runs" answers three long before it answers two, and puts the hips in the
   ribs.
+
+`python tools/make_test_room9.py` is the one that matters, because it is the
+unkind test: a room with a door and a shelf in it, a shadow on the floor, arms
+down, and **every shot metered differently**. Truth is crown y=300, feet
+y=1180, so in the 900-tall working copy the silhouette should be y=202, h=591
+in all eight. Before the fixes one shot came back at 87% of frame; after them
+all eight land on 202/591 exactly. If any of them drifts, that is a
+regression.
 
 `python tools/make_test_turns.py` draws the four views plus the empty room,
 of a figure whose neck, hips and floor are known. The carve should land on

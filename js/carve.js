@@ -47,12 +47,15 @@ export function silhouette(photo, plate, opts = {}) {
   const tol = opts.tol === undefined ? 34 : opts.tol;
 
   if (plate && plate.w === w && plate.h === h) {
+    // The phone re-metered between the shots, so the plate and this frame do
+    // not agree about how bright the room is. Corrected first, or nothing
+    // below means anything.
+    const g = exposureGain(photo, plate);
     for (let i = 0; i < w * h; i++) {
       const k = i * 4;
-      const d = Math.abs(photo.data[k] - plate.data[k])
-        + Math.abs(photo.data[k + 1] - plate.data[k + 1])
-        + Math.abs(photo.data[k + 2] - plate.data[k + 2]);
-      mask[i] = d > tol * 3 ? 1 : 0;
+      const pr = plate.data[k] * g[0], pg = plate.data[k + 1] * g[1], pb = plate.data[k + 2] * g[2];
+      const cr = photo.data[k], cg = photo.data[k + 1], cb = photo.data[k + 2];
+      mask[i] = isRoom(cr, cg, cb, pr, pg, pb, tol) ? 0 : 1;
     }
   } else {
     // no plate: the room is whatever the edge of the frame is, and whatever
@@ -74,10 +77,8 @@ export function silhouette(photo, plate, opts = {}) {
       const i = y * w + x;
       if (!mask[i]) return;
       const k = i * 4;
-      const d = Math.abs(photo.data[k] - edge[0])
-        + Math.abs(photo.data[k + 1] - edge[1])
-        + Math.abs(photo.data[k + 2] - edge[2]);
-      if (d > tol * 3.4) return;
+      if (!isRoom(photo.data[k], photo.data[k + 1], photo.data[k + 2],
+        edge[0], edge[1], edge[2], tol)) return;
       mask[i] = 0;
       stack.push(i);
     };
@@ -97,6 +98,84 @@ export function silhouette(photo, plate, opts = {}) {
   // spread the box over the picture's own w and h and every projection into
   // the mask reads the wrong row, silently, and the carve returns nothing.
   return { mask, mw: w, mh: h, ...bounds(mask, w, h) };
+}
+
+/**
+ * How much brighter this frame is than the plate.
+ *
+ * A phone re-meters between shots. It is not a small effect and it is not
+ * optional to handle: a wall at 220 coming back at 190 differs by ninety
+ * across three channels, which IS the whole threshold — so on the darker
+ * shots the entire room registers as the person, the outline becomes the
+ * frame, and the carve is left with a handful of chips. On a real capture,
+ * measured, one shot in eight came back with eighty-seven per cent of the
+ * picture marked as somebody standing in it.
+ *
+ * Measured on a ring round the edge of the frame, which is room in both
+ * pictures, and taken as a MEDIAN so that a foot or an elbow poking into the
+ * ring does not set the exposure for the whole photograph.
+ */
+function exposureGain(photo, plate) {
+  const w = photo.w, h = photo.h;
+  const band = Math.max(4, Math.round(Math.min(w, h) * 0.07));
+  const step = Math.max(1, Math.round(Math.min(w, h) / 90));
+  const r = [[], [], []];
+  const take = (x, y) => {
+    const k = (y * w + x) * 4;
+    for (let c = 0; c < 3; c++) {
+      const p = plate.data[k + c];
+      if (p < 18) continue;                 // a ratio off near-black is noise
+      r[c].push(photo.data[k + c] / p);
+    }
+  };
+  for (let y = 0; y < h; y += step) {
+    for (let x = 0; x < band; x += step) { take(x, y); take(w - 1 - x, y); }
+  }
+  for (let x = 0; x < w; x += step) {
+    for (let y = 0; y < band; y += step) { take(x, y); take(x, h - 1 - y); }
+  }
+  return r.map((list) => {
+    if (list.length < 20) return 1;
+    list.sort((a, b) => a - b);
+    const m = list[list.length >> 1];
+    return m > 0.4 && m < 2.5 ? m : 1;      // that is not exposure, that is a bug
+  });
+}
+
+/**
+ * Is this pixel the room rather than the person?
+ *
+ * Two ways of being the room, and the second one is what stops a person
+ * standing in a puddle of their own shadow:
+ *
+ *   the same        it matches the plate, once the exposure is corrected
+ *   the same, DIMMER  a shadow does not change what colour a wall is, it
+ *                   changes how much light comes off it. So a pixel that is
+ *                   the plate's colour MULTIPLIED DOWN — same ratios between
+ *                   the channels, lower overall — is a shadow on the room,
+ *                   not a person. Without this the outline grows a foot of
+ *                   floor at the feet, and since every view is scaled on the
+ *                   height of the outline, that foot of floor mis-scales
+ *                   everything.
+ *
+ * A person fails both because clothes and skin are a different HUE from the
+ * wall, not merely a different brightness. Which is exactly why the guidance
+ * asks you not to wear the colour of the wall: against it, this cannot work
+ * and nothing else can either.
+ */
+function isRoom(cr, cg, cb, pr, pg, pb, tol) {
+  const d = Math.abs(cr - pr) + Math.abs(cg - pg) + Math.abs(cb - pb);
+  if (d < tol * 1.4) return true;                       // plainly the same
+  // Compared as CHROMATICITY — the colour with the brightness divided out —
+  // because that is the quantity a shadow leaves alone and a person does not.
+  // Measured on the test room: a shadow moves it by about five thousandths, a
+  // pale green shirt against a white door by fifty, bare skin by ninety. The
+  // line goes in the gap, and it is a wide gap.
+  const cs = cr + cg + cb + 3, ps = pr + pg + pb + 3;
+  const bright = cs / ps;
+  if (bright > 1.10 || bright < 0.26) return false;      // too far to be shading
+  const dx = cr / cs - pr / ps, dy = cg / cs - pg / ps;
+  return Math.hypot(dx, dy) < 0.024;
 }
 
 /** Rub out speckle: a pixel with almost no company was noise, not a person. */
