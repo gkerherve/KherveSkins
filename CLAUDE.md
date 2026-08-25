@@ -246,6 +246,55 @@ Three more things that cost time and would cost it again:
   in practice — but it is why the test generator draws a yoke, and it is the
   reason the guidance asks for daylight at the ribs and not at the shoulder.
 
+## The head is not a carving problem
+
+`js/faces3d.js`, and the tick box on the 3D card that turns it on. Two
+separate claims, and the second is the one worth remembering.
+
+**Carving a head alone is worth doing.** The same photographs and the same
+plate, with each outline cut at the neck by `headOf` — a crown-to-neck band
+found by the width pinch under the skull — and the block of space is then a
+head's worth rather than a person's. It is the same code with a different
+extent, so nothing else in the flow changes. Measured on the twenty-turn
+room, the same photographs give **21,040 cubes for the head against 2,136 for
+the whole body**: not more information, all of it spent on the part anybody
+looks at.
+
+**But a carve should not be in the path to a face at all.** A visual hull
+answers a question about SHAPE, and a Minecraft head's shape is a fixed cube —
+it was never in question. What lands on the skin is the colour of six flat
+squares, so the sharpest possible answer is to take, for each square, the
+photograph shot most nearly from that direction and sample it straight in.
+Going through the hull instead averages the photographs into cubes and then
+the cubes into texels, and every averaging is a blur a sixteen-pixel face
+cannot spare. So the hull is still built — it is what you spin, and it is how
+the head's own proportions are known — and `facesFromViews` ignores it.
+
+The parts of that which cost time:
+
+- **`apart(a, b)` must return NOUGHT for equal angles.** Written the other way
+  round, every square took the photograph from the opposite side and the back
+  of the head came back with a face on it, which looks like a UV bug and is
+  not.
+- **Size the head box off the BAND, never off a ratio.** `w = h * 0.78` reaches
+  past the ears and each square came back with a stripe of wall down both
+  sides. The band already knows its own width, per view — and it should, since
+  a head is wider from the front than in profile and that is the whole reason
+  for taking both.
+- **One HEIGHT for every square, each view's own WIDTH.** A hairline that steps
+  half a texel between the front of the head and its side reads as a crack.
+- **Inset a hair all round.** An outline is a pixel or two generous at its
+  edge — the blur where hair meets wall belongs to neither — and on a
+  sixteen-wide face two pixels is a whole texel of wall.
+- **The head-only path writes through `noteEdit`, not through the skin.**
+  Those texels are somebody's deliberate work and have to survive every later
+  rebuild exactly as a brush stroke does. It is also what keeps the body's
+  photograph, clothes and colours: the head path never touches them.
+- **The top and the underneath come from the squares already painted** — the
+  crown off the back's top row, the jaw off the front's bottom row — because
+  nobody photographs the top of their own head, and a colour invented from
+  nothing belongs to a different person in a different light.
+
 `js/fit.js` maps the carve onto the model, and the fact it exists to deal
 with is that **a person is seven and a half heads tall and a Minecraft man is
 four**. So the mapping is anatomical, not a scale: find the neck, the hips
@@ -374,7 +423,8 @@ asking anybody to look:
 | `__openCat(key)` | open one rack of the wardrobe, or go back to the list |
 | `__shot(key, url)` | hand the capture one of its five photographs |
 | `__build()` | carve, and say how many cubes survived |
-| `__toMc()` | turn the carve into a skin |
+| `__toMc()` | turn the carve into a skin, or the head onto the man |
+| `__faceOnly(on)` | the just-the-head tick box |
 | `__cap` | the shots, the volume and the voxel mesh |
 | `__paint(x, y, hex)` | lay one texel exactly as a click would |
 | `capture(name)` | POST the render to `shots/NAME.png` |

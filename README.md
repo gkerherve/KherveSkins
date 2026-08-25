@@ -105,6 +105,27 @@ assumes one axis of rotation. And **hold your arms a little away from your
 sides** — an arm touching your ribs cannot be told from your ribs, and you
 come out as a barrel.
 
+![the head alone, carved from the same photographs](docs/head.png)
+
+**Just the head.** A tick box on the same card, and it is the setting most
+people want. Everything else is unchanged — the same photographs, the same
+empty room, the same turns — but it carves from the crown to the neck only,
+so the whole grid lands on the part anybody recognises: **about fifty cubes
+across a face instead of ten**, from exactly the pictures you already gave it.
+The body keeps whatever it already had, so a head from photographs can sit on
+a wardrobe you dressed by hand.
+
+It is also the better answer for a face, and not only the cheaper one. The
+six squares of the head are taken **straight from the photographs** — for
+each square, the shot taken most nearly square-on to it — rather than through
+the cubes. Going through the hull costs two averagings, photographs into
+cubes and cubes into texels, and a face sixteen pixels across cannot spare
+either. The hull is still built, because it is the thing you spin and it is
+how the app knows the head's own proportions; it is simply not in the path
+between the photograph and the face. The front square still gets the eye and
+mouth **warp** that the single-photograph path uses, which is most of the
+difference between a face and a smear.
+
 **Face.** Which of the eight rows the eyes and the mouth sit on, and the tone
 of the photograph — brightness, contrast, colour, warmth, sharpness. Also
 *features*: how hard the eyes, the brow line and the mouth are drawn on top
@@ -177,9 +198,11 @@ Nine files, and each one has a job:
 | `js/cropper.js` | the box, the two lines and the two pins |
 | `js/paint.js` | the flat editor, and mirroring |
 | `js/carve.js` | telling a person from a room, and carving the visual hull |
+| `js/turns.js` | working out which way round each photograph was |
+| `js/faces3d.js` | the six squares of the head, straight from the photographs |
 | `js/voxel.js` | showing the carved person |
 | `js/fit.js` | the carved person, made into a Minecraft man |
-| `js/wardrobe.js` | a hundred and twenty-five garments, each a function |
+| `js/wardrobe.js` | two hundred and forty-four garments, each a function |
 | `js/doll.js` | the little figures in the wardrobe's grid |
 | `js/store.js` | the shelf, and every way out |
 | `js/app.js` | what is wired to what |
