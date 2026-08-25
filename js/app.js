@@ -510,6 +510,7 @@ const cap = {
   mesh: null,
   wanted: null,
   headOnly: false,
+  faceTouched: false,
 };
 
 /**
@@ -606,9 +607,32 @@ function drawShots() {
     say('capSay', '', '');
   } else {
     const chk = checkSet(cap.angles);
+    const notes = [...chk.notes];
+
+    // A plate of a different shape is not a plate. Every pixel is compared
+    // against the wrong pixel, the whole frame comes back as a person, and the
+    // carve is a block — with nothing on screen to say why. Cheap to catch.
+    if (cap.plate) {
+      const p = cap.plate.photo;
+      const odd = cap.turns.some((t) => Math.abs(
+        (t.photo.w / t.photo.h) - (p.w / p.h)) > 0.04);
+      if (odd) notes.unshift('the empty room is a different shape from the turns — '
+        + 'it has to be the same camera, held the same way');
+    }
+
+    // Head and shoulders? Then there is no body to carve, and saying so beats
+    // handing back a Minecraft man whose legs were guessed from a chin.
+    if (!cap.faceTouched) {
+      const was = $('faceOnly').checked;
+      $('faceOnly').checked = chk.portrait;
+      if (chk.portrait && !was) {
+        notes.unshift('these are head-and-shoulders photographs, so'
+          + ' “just the head” is on — untick it if you meant the whole man');
+      }
+    }
     say('capSay', `${n} photograph${n === 1 ? '' : 's'}`
-      + (chk.notes.length ? ` — ${chk.notes.join('; ')}` : ', and they look usable'),
-    chk.notes.length ? '' : 'good');
+      + (notes.length ? ` — ${notes.join('; ')}` : ', and they look usable'),
+    notes.length ? '' : 'good');
   }
 }
 
@@ -673,10 +697,14 @@ $('capReset').onclick = () => {
   cap.front = -1;
   cap.flip = undefined;
   cap.vol = null;
+  cap.faceTouched = false;
+  $('faceOnly').checked = false;
   drawShots();
   say('capSay', '', '');
 };
 $('againBtn').onclick = () => { $('built').hidden = true; $('capture').hidden = false; };
+
+$('faceOnly').onchange = () => { cap.faceTouched = true; };
 
 $('buildBtn').onclick = () => {
   cap.headOnly = $('faceOnly').checked;
@@ -1519,7 +1547,11 @@ Object.assign(window, {
   __flip: () => { cap.flip = !cap.flip; reread(); return !!cap.flip; },
   __build: () => { $('buildBtn').click(); return cap.vol ? cap.vol.count() : 0; },
   __toMc: () => { $('toMcBtn').click(); return true; },
-  __faceOnly: (on) => { $('faceOnly').checked = !!on; return $('faceOnly').checked; },
+  __faceOnly: (on) => {
+    if (on === undefined) return $('faceOnly').checked;
+    $('faceOnly').checked = !!on; cap.faceTouched = true;
+    return $('faceOnly').checked;
+  },
   __png: () => S.skin.toDataURL(),
   __view: view,
   __fig: () => fig,
