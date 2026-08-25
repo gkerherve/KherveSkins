@@ -62,6 +62,8 @@ sampler pins the eye line, the mouth line and both eyes onto whole texels
 before it averages anything. When the automatic guess is wrong, drag them;
 it takes a second and it is the difference between a face and a smudge.
 
+![four photographs, carved, and made into a man](docs/carve.png)
+
 **3D.** The other way in, and the more interesting one: **four photographs
 and it works out your actual shape**. Not a face on a box — you, from every
 side. Prop the phone up, stand well back, and turn a quarter at a time while
