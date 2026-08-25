@@ -406,7 +406,22 @@ export function carve(views, o = {}) {
       scale,
       top: medTop,
       cx: v.sil.headX,
-      dir: [Math.sin(a), 0, -Math.cos(a)],   // which way this camera looks from
+      // Which way this camera looks FROM — the outward normal of the surface
+      // it can see. Both signs are negative and the x one was wrong for a
+      // long time, so it is worth writing down how it is settled rather than
+      // argued: the projection above is px = cx + (dx·cos − dz·sin)·scale,
+      // and the depth orthogonal to it is dx·sin + dz·cos, growing AWAY from
+      // the camera. So the camera stands at minus that, (−sin a, 0, −cos a).
+      //
+      // The measurement that agrees: `tools/make_test_room9.py --mark` paints
+      // his right arm red and his left arm blue, and in the front photograph
+      // the red one lands on the LEFT of the frame — which is what "his
+      // right" MEANS and needs no convention to state. At 90° only the red
+      // arm is visible. So 90° sees his right side, which is the low end of
+      // x, which is (−1, 0, 0). Written +sin, `paint` handed every cube on
+      // his left the colour of the camera looking at his right: a figure
+      // whose two sides had swapped, and nothing symmetrical could show it.
+      dir: [-Math.sin(a), 0, -Math.cos(a)],
     };
   });
 

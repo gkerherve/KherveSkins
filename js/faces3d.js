@@ -30,6 +30,22 @@ import { headOf } from './carve.js';
 // front square — normal -Z — is the photograph taken at nought.
 const FACE_ANGLE = { front: 0, right: 90, back: 180, left: 270 };
 
+// And which way round each square reads, which is NOT the same question and
+// was got wrong for both profiles.
+//
+// A photograph runs left to right. A square of the head runs whichever way
+// `fit.js` says it does: on the FRONT square the first texel is his right, on
+// the BACK his left, and on either SIDE square the first texel is his FACE and
+// the last is the back of his head. Work each one out against the projection
+// — screen-across is dx·cos a − dz·sin a, his right is low x, his front is low
+// z — and the two flat squares come out reading the same way as the picture
+// while both profiles come out reversed.
+//
+// The symptom was a profile with the hair at the front and the face round the
+// back of the ear, which on a real head is hard to see and impossible to
+// unsee: the hairline runs the wrong way and nothing else looks wrong.
+const FACE_FLIP = { front: false, right: true, back: false, left: true };
+
 const median = (list) => {
   const v = [...list].sort((a, b) => a - b);
   return v.length % 2 ? v[(v.length - 1) / 2] : (v[v.length / 2 - 1] + v[v.length / 2]) / 2;
@@ -95,7 +111,8 @@ export function facesFromViews(skin, views, o = {}) {
     if (!grid) grid = sampleRect(best.photo, x, top, w, h, N, N);
 
     grid = grid.map((c) => tone(c, o));
-    skin.mapRect(head.rects[face], (u, v) => grid[v * N + u]);
+    const flip = FACE_FLIP[face];
+    skin.mapRect(head.rects[face], (u, v) => grid[v * N + (flip ? N - 1 - u : u)]);
   }
 
   // The top and the underneath, which nobody photographs. Taken from the
