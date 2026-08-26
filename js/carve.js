@@ -93,6 +93,7 @@ export function silhouette(photo, plate, opts = {}) {
 
   clean(mask, w, h);
   keepLargest(mask, w, h);
+  fillHoles(mask, w, h);
   // `mw`/`mh` are the PICTURE, `x/y/w/h` are the person in it. Two different
   // sizes with the obvious names, and the mask is indexed by the first —
   // spread the box over the picture's own w and h and every projection into
@@ -192,6 +193,31 @@ function clean(mask, w, h) {
     }
     mask.set(out);
   }
+}
+
+/**
+ * A person is opaque, so a hole INSIDE their outline is always a mistake —
+ * a shiny forehead that matched the wall, glasses, a dark eye against a dark
+ * doorway. Left in, each one is a tunnel bored straight through the volume:
+ * the carve trusts every view, so one bad patch in one photograph gouges the
+ * whole head. Flood the empty pixels in from the frame's edge; whatever the
+ * flood cannot reach is enclosed, and enclosed means person.
+ */
+function fillHoles(mask, w, h) {
+  const seen = new Uint8Array(w * h);
+  const stack = [];
+  const push = (i) => { if (!mask[i] && !seen[i]) { seen[i] = 1; stack.push(i); } };
+  for (let x = 0; x < w; x++) { push(x); push((h - 1) * w + x); }
+  for (let y = 0; y < h; y++) { push(y * w); push(y * w + w - 1); }
+  while (stack.length) {
+    const i = stack.pop();
+    const x = i % w;
+    if (x > 0) push(i - 1);
+    if (x < w - 1) push(i + 1);
+    if (i >= w) push(i - w);
+    if (i < w * (h - 1)) push(i + w);
+  }
+  for (let i = 0; i < mask.length; i++) if (!mask[i] && !seen[i]) mask[i] = 1;
 }
 
 /** One person, not a person and a shadow and a coat on a hook. */
@@ -457,8 +483,8 @@ export function carve(views, o = {}) {
   const nz = o.nz || 40;
   const vol = new Volume(nx, ny, nz);
 
-  // ONE scale and ONE crown row for every view, and both are the MEDIAN of
-  // what the outlines said rather than each view's own.
+  // ONE scale for every view — the MEDIAN of what the outlines said, never
+  // each view's own.
   //
   // This is the fix for a carve that comes out as a cloud of chips. The
   // camera did not move and the person did not grow, so they are the same
@@ -466,11 +492,23 @@ export function carve(views, o = {}) {
   // shadow or lost a foot. Let such a view set its own scale and its whole
   // projection is stretched by a fifth, which slices the volume to ribbons;
   // take the median and one bad outline costs a little accuracy instead of
-  // most of the person. Where the head sits ACROSS the frame stays per-view,
-  // because that one really can shift a little between shots.
+  // most of the person.
+  //
+  // WHERE the person sits in the frame, though, is per-view, in BOTH axes.
+  // Across was always per-view (headX); the crown row used to be the median
+  // too, and that assumption is simply false of real photographs: a handheld
+  // phone bobs a little between shots, so the head is at a different height
+  // in every frame. Anchor every view to one shared row and each one carves
+  // its own copy of the person a few cubes above or below the others' — the
+  // intersection loses the crown in steps and the chin in slivers. Measured
+  // on a portrait set bobbing by ±18px: 959 cubes of head gone. Each view's
+  // own crown row is the anchor, clamped to the median ± a sixth of the
+  // height so one outline that caught something above the head cannot drag
+  // its whole projection off the person.
   const medH = median(views.map((v) => v.sil.h));
   const medTop = median(views.map((v) => v.sil.y));
   const scale = medH / ny;
+  const slack = medH * 0.16;
 
   const cams = views.map((v) => {
     const a = (v.angle || 0) * Math.PI / 180;
@@ -480,7 +518,7 @@ export function carve(views, o = {}) {
       cos: Math.cos(a),
       sin: Math.sin(a),
       scale,
-      top: medTop,
+      top: Math.max(medTop - slack, Math.min(medTop + slack, v.sil.y)),
       cx: v.sil.headX,
       // Which way this camera looks FROM — the outward normal of the surface
       // it can see. Both signs are negative and the x one was wrong for a
@@ -584,24 +622,86 @@ function tidy(vol) {
 function paint(vol, cams) {
   const { nx, ny, nz } = vol;
   const half = (nx - 1) / 2, halfZ = (nz - 1) / 2;
+  for (const c of cams) c.midY = c.top + (ny * c.scale) / 2;
+
+  const inside = (c, px, py) => px >= 0 && py >= 0 && px < c.sil.mw && py < c.sil.mh
+    && c.sil.mask[py * c.sil.mw + px];
+
+  // A projected sample point is allowed to be a pixel or two OFF the person —
+  // the hull is a cube-sized approximation of them, so a cube's centre can
+  // overhang the outline — and near the crown it usually is. Sampled where it
+  // lands, that pixel is the WALL, and the head comes back with a scattering
+  // of wall-coloured chips across the top and a pale rim down every edge:
+  // 167 chips on the bobbing test set, five per cent of the whole surface.
+  // So walk the point toward the middle of the person until it lands on
+  // them, then two steps more — the blurred pixel where hair meets wall
+  // belongs to neither.
+  const seat = (c, px, py, reach) => {
+    const dx = Math.sign(c.cx - px) || 1;
+    const dy = Math.sign(c.midY - py) || 1;
+    let x = px, y = py;
+    for (let i = 0; i <= reach; i++) {
+      if (inside(c, Math.round(x), Math.round(y))) {
+        const ix = Math.round(x + dx * 2), iy = Math.round(y + dy * 2);
+        return inside(c, ix, iy) ? [ix, iy] : [Math.round(x), Math.round(y)];
+      }
+      x += dx * 0.9; y += dy * 0.9;
+    }
+    return null;
+  };
+
+  // One cube covers scale-by-scale pixels of photograph, so one pixel of
+  // photograph is the wrong amount to ask: it carries that pixel's noise, and
+  // neighbouring cubes land on unrelated pixels, which is what gave the whole
+  // surface a static of vertical stripes. Average the patch the cube actually
+  // covers — person pixels only.
+  const patch = (c, px, py) => {
+    const r = Math.max(1, Math.round(c.scale * 0.45));
+    let sr = 0, sg = 0, sb = 0, n = 0;
+    for (let j = -r; j <= r; j++) {
+      for (let i = -r; i <= r; i++) {
+        if (!inside(c, px + i, py + j)) continue;
+        const col = c.photo.px(px + i, py + j);
+        sr += col[0]; sg += col[1]; sb += col[2]; n++;
+      }
+    }
+    if (!n) { const col = c.photo.px(px, py); return [col[0], col[1], col[2]]; }
+    return [sr / n, sg / n, sb / n];
+  };
+
+  const project = (c, x, y, z) => {
+    const u = (x - half) * c.cos - (z - halfZ) * c.sin;
+    return [Math.round(c.cx + u * c.scale), Math.round(c.top + y * c.scale)];
+  };
+
   for (const [x, y, z] of vol.surface()) {
     const n = [
       (vol.at(x + 1, y, z) ? 0 : 1) - (vol.at(x - 1, y, z) ? 0 : 1),
       (vol.at(x, y + 1, z) ? 0 : 1) - (vol.at(x, y - 1, z) ? 0 : 1),
       (vol.at(x, y, z + 1) ? 0 : 1) - (vol.at(x, y, z - 1) ? 0 : 1),
     ];
-    let best = cams[0], bestDot = -Infinity;
-    for (const c of cams) {
-      const dot = n[0] * c.dir[0] + n[2] * c.dir[2];
-      if (dot > bestDot) { bestDot = dot; best = c; }
+    // every camera, most nearly facing this cube first — so when the best
+    // one's sample point cannot be seated on the person, the second one gets
+    // asked rather than the wall
+    const ranked = [...cams].sort((a, b) => (n[0] * b.dir[0] + n[2] * b.dir[2])
+      - (n[0] * a.dir[0] + n[2] * a.dir[2]));
+    let colour = null;
+    for (const c of ranked) {
+      const [px, py] = project(c, x, y, z);
+      const at = seat(c, px, py, Math.ceil(c.scale) + 3);
+      if (at) { colour = patch(c, at[0], at[1]); break; }
     }
-    const dx = x - half, dz = z - halfZ;
-    const u = dx * best.cos - dz * best.sin;
-    const px = Math.round(best.cx + u * best.scale);
-    const py = Math.round(best.top + y * best.scale);
-    const c = best.photo.px(px, py);
+    if (!colour) {
+      // nothing close: take the best-facing view and march as far as it needs
+      const c = ranked[0];
+      const [px, py] = project(c, x, y, z);
+      const at = seat(c, px, py, Math.round(ny * c.scale));
+      colour = at ? patch(c, at[0], at[1])
+        : c.photo.px(Math.max(0, Math.min(c.sil.mw - 1, px)),
+                     Math.max(0, Math.min(c.sil.mh - 1, py)));
+    }
     const i = vol.idx(x, y, z) * 3;
-    vol.colour[i] = c[0]; vol.colour[i + 1] = c[1]; vol.colour[i + 2] = c[2];
+    vol.colour[i] = colour[0]; vol.colour[i + 1] = colour[1]; vol.colour[i + 2] = colour[2];
   }
 }
 

@@ -260,17 +260,24 @@ def main() -> None:
     import sys
     turns = 8
     if "--portrait" in sys.argv:
-        # what somebody photographing their own face hands the program: the
-        # neck is HALFWAY down the outline, not an eighth of the way
+        # What somebody photographing their own face hands the program: the
+        # neck is HALFWAY down the outline, not an eighth of the way — and the
+        # head is at a DIFFERENT HEIGHT in every frame, because no two
+        # handheld shots frame alike. The bob is the part that matters: a
+        # carve that assumes the crown sits on the same row of every
+        # photograph slices a real head into steps.
+        BOB = {0: 0, 45: -14, 90: 10, 135: -6, 180: 16, 225: -12, 270: 4, 315: -18}
         PARTS.extend(CHEEKS)
         os.makedirs(OUT, exist_ok=True)
         for a in [None, 0, 45, 90, 135, 180, 225, 270, 315]:
             name = "port-plate.png" if a is None else f"port-{a}.png"
             path = os.path.join(OUT, name)
             shot(a, path)
-            Image.open(path).crop(PORTRAIT).save(path)
-        print("head-and-shoulders framing; his RIGHT cheek is red")
-        print("and lands on the LEFT of port-0.png")
+            dy = 0 if a is None else BOB[a]
+            x0, y0, x1, y1 = PORTRAIT
+            Image.open(path).crop((x0, y0 + dy, x1, y1 + dy)).save(path)
+        print("head-and-shoulders framing, bobbing a few pixels a frame;")
+        print("his RIGHT cheek is red and lands on the LEFT of port-0.png")
         return
     if "--mark" in sys.argv:
         # his right arm red, his left arm blue, and nothing else changed

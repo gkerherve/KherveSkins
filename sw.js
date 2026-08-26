@@ -11,7 +11,7 @@
 //                    changes for a given version, and it is the one thing
 //                    that stops this working with no signal.
 
-const CACHE = 'kherveskins-v6';
+const CACHE = 'kherveskins-v7';
 const THREE = 'https://unpkg.com/three@0.160.0/build/three.module.js';
 
 const SHELL = [

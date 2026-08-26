@@ -201,6 +201,36 @@ his right side, which is the low end of x, which is (−1, 0, 0). Counted over
 the marked head: **248 marker cubes on the correct side and 8 wrong with the
 right sign; 67 right and 105 wrong with the old one** — worse than a coin.
 
+**The MEDIAN is for the scale; the crown row is per view.** The first half of
+this rule was learned early: a view allowed to set its own scale stretches its
+whole projection and slices the volume to ribbons, so every view shares the
+median height. The second half was learned from a real capture: a handheld
+phone BOBS between shots, so the head is at a different height in every frame
+— anchor every view to one shared crown row and each carves its copy of the
+person a few cubes above or below the others', and the intersection loses the
+crown in steps. Measured on a portrait set bobbing ±18px: 959 cubes gone.
+Each view anchors on its own `sil.y`, clamped to the median ± a sixth of the
+height so one outline that caught something overhead cannot drag its view off
+the person.
+
+**`paint` must never sample the room.** A cube's centre can overhang the
+outline — the hull is a cube-sized approximation — and near the crown it
+usually does, so sampling wherever the projection lands scattered 167
+wall-coloured chips across the top of the bobbing test head. The sample point
+is walked toward the middle of the person until it lands on them, plus two
+steps for the blurred edge; if the best-facing camera cannot be seated the
+next one is asked. And one cube covers scale-by-scale PIXELS, so it averages
+the patch it covers (person pixels only) rather than carrying one pixel's
+noise — which is what the static of vertical stripes on every surface was.
+
+**A hole inside an outline is always a mistake.** A person is opaque; a shiny
+forehead that matched the wall, glasses, a dark eye on a dark doorway — each
+leaves a hole, and each hole is a tunnel bored through the volume, because
+the carve trusts every view. `fillHoles` floods the empty pixels in from the
+frame edge and fills whatever it cannot reach. The one price: a genuine
+window through the person (a hand on a hip) fills too, which is why the
+guidance asks for arms a little clear rather than akimbo.
+
 **Normalise every view on the MEDIAN height, not on its own.** The camera did
 not move and the person did not grow, so they are the same height in every
 shot; any disagreement is an outline that caught a shadow or lost a foot. A
