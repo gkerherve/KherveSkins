@@ -365,17 +365,29 @@ the cubes into texels, and every averaging is a blur a sixteen-pixel face
 cannot spare. So the hull is still built — it is what you spin, and it is how
 the head's own proportions are known — and `facesFromViews` ignores it.
 
-**A profile square is reversed and the flat ones are not.** A photograph runs
-left to right; a square of the head runs whichever way `fit.js` says. On the
-FRONT square the first texel is his right, on the BACK his left, and on either
-SIDE square the first texel is his FACE and the last is the back of his head.
-Work each against the projection — across is dx·cos a − dz·sin a, his right is
-low x, his front is low z — and the two flat squares read the same way as the
-picture while both profiles read backwards. Sampled straight in, every side
-view came out with the hair at the front and the face round the back of the
-ear: on a real head that is hard to see and impossible to unsee.
+**Every square reads exactly the way a photograph of it reads — no flips,
+and that is what the Minecraft unfold IS.** Each square of the skin is its
+face seen from OUTSIDE the cube, and a photograph taken square-on to a face
+is precisely that view. Measured on the model with painted columns: the
+right square runs back-of-head at u=0 to nose at the last texel, the left
+square nose-first — and a 90° photo puts the nose at the image's right, a
+270° photo at its left. Texel for texel, the raw sample is right.
 
-![the four head squares, and the man wearing them](docs/sides.png)
+That measurement exists because the opposite was shipped twice. A flip was
+added here on the strength of fit.js's own axis comment and a dump of the
+flat texture, and it put every profile's face round the back of the ear —
+the player saw it on their own head before any test did. fit.js's side
+faces had in fact been mirrored since the day they were written, invisible
+because a torso's sides are one colour. Hence the rule, now load-bearing:
+**an orientation is verified on the MODEL, never on the texture** — paint
+one column red, render the cube, look. A flat dump cannot say which way a
+square will be read, and neither can a comment.
+
+One trap in taking that render: the head follows the pointer, so zero the
+head joint's rotation first or the photograph is of a head turned to look
+at something else, and the verdict is noise.
+
+![the head from all four sides, on the man](docs/sides.png)
 
 The parts of that which cost time:
 

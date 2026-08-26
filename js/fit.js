@@ -275,8 +275,15 @@ export function fitToSkin(skin, vol, opts = {}) {
         let ax, ay, az;                     // 0..1 along the model's x, y, z
         if (face === 'front') { ax = 1 - a; ay = 1 - b; az = 0; }
         else if (face === 'back') { ax = a; ay = 1 - b; az = 1; }
-        else if (face === 'right') { ax = 1; ay = 1 - b; az = a; }
-        else if (face === 'left') { ax = 0; ay = 1 - b; az = 1 - a; }
+        // The side squares read the way a PHOTOGRAPH of that side reads,
+        // because every square of the skin is its face seen from outside the
+        // cube: the right square runs back-of-head to nose, the left square
+        // nose to back-of-head. Both were written the other way round here
+        // for a long time — invisible on a torso, whose sides are one colour,
+        // and measured on the model with a painted column the day a
+        // photographed head made it visible.
+        else if (face === 'right') { ax = 1; ay = 1 - b; az = 1 - a; }
+        else if (face === 'left') { ax = 0; ay = 1 - b; az = a; }
         else if (face === 'top') { ax = 1 - a; ay = 1; az = 1 - b; }
         else { ax = 1 - a; ay = 0; az = b; }
 
