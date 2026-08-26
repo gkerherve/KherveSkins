@@ -90,6 +90,17 @@ shadow does not change what colour the floor is, only how much light comes off
 it. Without that the outline grows a foot of floor, and since every view is
 scaled on the height of its outline, one shadow mis-scales the lot.
 
+**Or skip the photographs and take one video.** Prop the phone, press record
+on the empty room, step in, turn one slow full circle, step out, stop. The
+recording is the whole capture in a single take — the opening frame is the
+empty room and everything after it is a turn. The program pulls out a couple
+of stills a second, drops the ones where nobody is in frame and the ones
+where you had not actually turned since the last one kept, and builds the
+moment it has enough. A second video adds to the pile; carry on turning from
+where the last one stopped. (A truly live camera needs a secure https page,
+which a home server is not — a recording is the same pixels at thirty a
+second, and you can retake it.)
+
 Everything it needs to know about the photographs it works out from their
 SHAPE and never from a fraction of the frame — where the neck is, which way
 you were facing, which way round you turned. Hair up in a bun, standing back,

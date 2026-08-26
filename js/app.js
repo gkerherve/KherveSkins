@@ -660,6 +660,123 @@ async function addTurns(files) {
   reread();
 }
 
+/**
+ * A whole capture out of one video.
+ *
+ * The recording IS the capture flow, run at thirty frames a second: the first
+ * moment is the empty room, everything after it is a turn. So the first frame
+ * becomes the plate (unless one is already on file), and then stills are
+ * pulled out along the length of the take. Two filters decide which stills
+ * deserve to be turns, and both matter:
+ *
+ *   **empty frames go** — before the person steps in and after they step out
+ *   the outline is nothing, and a nothing-outline as a "turn" would carve the
+ *   whole volume away;
+ *   **standing still goes** — the angles are assigned by spreading the KEPT
+ *   frames evenly round a circle, so ten stills of somebody pausing at the
+ *   start would eat a hundred degrees of it. A still is kept only when the
+ *   outline has actually changed since the last one kept, which makes the
+ *   spacing follow the TURN rather than the clock. Turn slowly where it
+ *   matters and the pile simply gets denser there.
+ *
+ * The volume is rebuilt as the stills land, which is as close to "watch
+ * yourself appear" as a browser on a plain http page can be taken: a live
+ * camera needs a secure origin, a recording does not, and they are the same
+ * pixels.
+ */
+async function addVideo(file) {
+  const url = typeof file === 'string' ? file : URL.createObjectURL(file);
+  const vid = document.createElement('video');
+  vid.muted = true;
+  vid.playsInline = true;
+  vid.preload = 'auto';
+  vid.src = url;
+  try {
+    await new Promise((ok, bad) => {
+      vid.onloadedmetadata = ok;
+      vid.onerror = () => bad(new Error('could not read that video'));
+    });
+    // a recorded blob can report no length until pushed to the end
+    if (!isFinite(vid.duration)) {
+      vid.currentTime = 1e9;
+      await new Promise((ok) => { vid.ondurationchange = ok; });
+      vid.currentTime = 0;
+    }
+    const D = vid.duration;
+    if (!isFinite(D) || D < 1.2) { say('capSay', 'that video is too short to hold a turn', 'bad'); return; }
+
+    const cvs = document.createElement('canvas');
+    const ctx = cvs.getContext('2d', { willReadFrequently: true });
+    const grab = async (t) => {
+      vid.currentTime = Math.min(Math.max(t, 0.05), D - 0.05);
+      await new Promise((ok) => { vid.onseeked = ok; });
+      const k = Math.min(1, 680 / Math.max(vid.videoWidth, vid.videoHeight));
+      cvs.width = Math.max(1, Math.round(vid.videoWidth * k));
+      cvs.height = Math.max(1, Math.round(vid.videoHeight * k));
+      ctx.drawImage(vid, 0, 0, cvs.width, cvs.height);
+      return new Photo(cvs, 680);
+    };
+
+    let start = 0.1;
+    if (!cap.plate) {
+      say('capSay', 'reading the video — the opening frame is the empty room…');
+      const photo = await grab(0.12);
+      cap.plate = { photo, thumb: thumbOf(photo, null) };
+      drawShots();
+      start = 0.8;                       // give them time to step in
+    }
+    const plate = cap.plate.photo;
+
+    // how different two outlines are: pixels in one and not the other, over
+    // pixels in either — nought for the same pose, and it grows as they turn
+    const differs = (a, b) => {
+      if (!a || !b || a.mw !== b.mw || a.mh !== b.mh) return 1;
+      let xor = 0, or = 0;
+      for (let i = 0; i < a.mask.length; i++) {
+        const p = a.mask[i], q = b.mask[i];
+        if (p || q) { or++; if (p !== q) xor++; }
+      }
+      return or ? xor / or : 0;
+    };
+
+    const end = D - 0.15;
+    const n = Math.max(10, Math.min(30, Math.round((end - start) * 2.5)));
+    let kept = 0, lastSil = null;
+    say('capSay', `reading the video — 0 of ${n} stills…`);
+    for (let i = 0; i < n; i++) {
+      const t = start + (end - start) * (i / Math.max(1, n - 1));
+      const photo = await grab(t);
+      const sil = silhouette(photo, plate);
+      if (!sil || sil.area < 0.008) continue;          // nobody in frame yet
+      if (lastSil && differs(sil, lastSil) < 0.045) continue;   // not turned yet
+      lastSil = sil;
+      cap.turns.push({ photo, name: `video at ${t.toFixed(1)}s` });
+      kept++;
+      if (kept % 3 === 0) {
+        cap.front = -1; cap.flip = undefined;
+        reread();
+        say('capSay', `reading the video — ${kept} turns kept of ${i + 1} stills…`);
+      }
+      await new Promise((r) => setTimeout(r, 0));
+    }
+    cap.front = -1;
+    cap.flip = undefined;
+    reread();
+    if (kept < 3 && cap.turns.length < 3) {
+      say('capSay', 'the video never showed anybody turning — was the room empty '
+        + 'when it started, and did you step in?', 'bad');
+      return;
+    }
+    say('capSay', `${kept} turns pulled from the video — building…`, 'good');
+    // and the volume appears without another press, which is the point
+    $('buildBtn').click();
+  } catch (e) {
+    say('capSay', (e && e.message) || 'could not read that video', 'bad');
+  } finally {
+    if (typeof file !== 'string') URL.revokeObjectURL(url);
+  }
+}
+
 async function setPlate(file) {
   try {
     const img = await loadImage(file);
@@ -686,6 +803,8 @@ $('plateIn').onchange = (e) => { if (e.target.files[0]) setPlate(e.target.files[
 $('plateCamIn').onchange = (e) => { if (e.target.files[0]) setPlate(e.target.files[0]); e.target.value = ''; };
 $('turnsIn').onchange = (e) => { addTurns(e.target.files); e.target.value = ''; };
 $('turnsCamIn').onchange = (e) => { addTurns(e.target.files); e.target.value = ''; };
+$('videoBtn').onclick = () => $('videoIn').click();
+$('videoIn').onchange = (e) => { if (e.target.files[0]) addVideo(e.target.files[0]); e.target.value = ''; };
 $('flipBtn').onclick = () => {
   cap.flip = !cap.flip;
   reread();
@@ -1547,6 +1666,7 @@ Object.assign(window, {
   __flip: () => { cap.flip = !cap.flip; reread(); return !!cap.flip; },
   __build: () => { $('buildBtn').click(); return cap.vol ? cap.vol.count() : 0; },
   __toMc: () => { $('toMcBtn').click(); return true; },
+  __video: (url) => addVideo(url),
   __faceOnly: (on) => {
     if (on === undefined) return $('faceOnly').checked;
     $('faceOnly').checked = !!on; cap.faceTouched = true;

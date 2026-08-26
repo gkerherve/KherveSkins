@@ -297,6 +297,25 @@ the wrong pixel, the whole frame comes back as a person, and the carve is a
 solid block with nothing on screen to say why. One line to catch, and it cost
 an hour of believing a bug that was a stale file.
 
+**A video is the capture flow at thirty frames a second** — `addVideo` in
+`js/app.js`. The opening frame is the plate (unless one is on file), the rest
+are turns, and two filters pick the stills: empty frames go, and a still is
+kept only when the outline has CHANGED since the last one kept (symmetric
+difference over union, above 4.5%). The second filter is what makes the
+even-spread angle assumption survive a person who pauses — kept frames space
+themselves by TURN, not by clock, so ten seconds of standing still costs
+nothing. Verified on a synthesised webm of the eight portrait poses held a
+second each: exactly eight stills kept of thirty, every angle exact, and the
+same cubes as the photo path to within one per cent. Two traps in the
+synthesis: rAF never fires in a hidden pane, so the recording is driven by
+`captureStream(0)` + `requestFrame()` on a timeout loop; and a MediaRecorder
+blob reports Infinity for its duration until pushed to its end.
+
+One honest limit, stated in the UI: the pile is read as ONE long turn, so a
+second video must carry on from where the last stopped, not start the circle
+again. Live camera (getUserMedia) needs a secure origin and a home http
+server is not one — the recording is the same pixels, retakeable.
+
 **Four turns is the minimum and eight is the point.** With four, every
 cross-section of the hull is a square, so shoulders come out with corners on
 them — visible the moment you turn it 45 degrees. Past seven views a cube is

@@ -396,6 +396,14 @@
             nobody in it. It costs five seconds and it is worth more than the other
             four put together, because then the program knows exactly what is room and
             what is you, including the shadow you throw on the floor.</div>
+          <div class="hint"><b>Or take one video instead of any of it.</b> Prop the
+            phone, press record on the empty room, step in, turn one slow full
+            circle, step out, stop. The first moment is the empty room and the rest
+            are the turns — the program pulls out a still each time you have turned
+            a little and drops everything else. It is the same photographs at thirty
+            a second, and easier to take well. (A truly live camera needs a secure
+            https page, which a home server is not — a recording is as close as a
+            browser will allow, and you can retake it.)</div>
           <div class="btns"><button id="startCap" class="key">Start</button></div>
         </div>
 
@@ -415,14 +423,24 @@
           <div class="btns">
             <button id="turnsBtn" class="key">Add photos…</button>
             <button id="turnsCam">Take one</button>
+            <button id="videoBtn">…or a video</button>
           </div>
           <div class="hint">Pick them all in one go, or drop them on the window.
             <b>As many as you like</b> — twelve is plenty, twenty is better, and the
-            program works out which way round each one was.</div>
+            program works out which way round each one was.
+            <br><br><b>Or film it instead:</b> prop the phone, start recording on the
+            <b>empty room</b>, step in, turn one slow full circle — count ten — and
+            step out. One video is the empty room and every turn in a single take:
+            the program pulls the stills out itself, keeps one each time you have
+            actually turned, and builds as they land. Another video adds to the
+            pile — <b>carry on turning from where the last one stopped</b> rather
+            than starting the circle again, because the pile is read as one long
+            turn.</div>
           <input type="file" id="plateIn" accept="image/*" hidden>
           <input type="file" id="plateCamIn" accept="image/*" capture="environment" hidden>
           <input type="file" id="turnsIn" accept="image/*" multiple hidden>
           <input type="file" id="turnsCamIn" accept="image/*" capture="environment" hidden>
+          <input type="file" id="videoIn" accept="video/*" hidden>
 
           <div id="shots"></div>
           <div class="say" id="capSay"></div>
