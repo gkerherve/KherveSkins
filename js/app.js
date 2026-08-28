@@ -871,13 +871,23 @@ $('buildBtn').onclick = () => {
   const views = cap.headOnly
     ? whole.map((v) => ({ ...v, sil: headOf(v.sil) }))
     : whole;
-  say('capSay', `carving from ${views.length}…`);
+  // The odd-sized views out — the ones `report` names and promises are
+  // ignored. They now ARE ignored: a view whose outline is a different height
+  // from the others caught a shadow or lost a foot, and carving with it slices
+  // the volume with a mis-scaled projection. Dropped only while at least three
+  // agreeing views remain, because three is the least a carve can stand on.
+  const hs = views.map((v) => v.sil.h).sort((a, b) => a - b);
+  const medH = hs.length % 2 ? hs[(hs.length - 1) / 2]
+    : (hs[hs.length / 2 - 1] + hs[hs.length / 2]) / 2;
+  const agreeing = views.filter((v) => Math.abs(v.sil.h - medH) / medH <= 0.14);
+  const used = agreeing.length >= 3 ? agreeing : views;
+  say('capSay', `carving from ${used.length}…`);
   // a head is wider for its height than a body is, so the block it is carved
   // out of is a different shape
   const vol = cap.headOnly
-    ? carve(views, { ny: 56, nx: 52, nz: 52 })
-    : carve(views, { ny: 76, nx: 44, nz: 44 });
-  const rep = report(views, vol);
+    ? carve(used, { ny: 56, nx: 52, nz: 52 })
+    : carve(used, { ny: 76, nx: 44, nz: 44 });
+  const rep = report(views, vol, whole);
   cap.vol = vol;
   $('capture').hidden = true;
   $('built').hidden = false;
@@ -893,8 +903,8 @@ $('buildBtn').onclick = () => {
     : '';
   const cubes = vol.count();
   say('builtSay', rep.notes.length
-    ? `${cubes} cubes from ${views.length} photographs — but: ${rep.notes.join('; ')}`
-    : `${cubes} cubes, from ${views.length} photographs`,
+    ? `${cubes} cubes from ${used.length} photographs — but: ${rep.notes.join('; ')}`
+    : `${cubes} cubes, from ${used.length} photographs`,
   rep.notes.length ? '' : 'good');
 };
 

@@ -712,9 +712,12 @@ function paint(vol, cams) {
  * just a slightly odd person — so it is worth saying out loud when the
  * numbers were poor.
  */
-export function report(views, vol) {
+export function report(views, vol, wholeViews) {
   const notes = [];
-  const areas = views.map((v) => v.sil.area);
+  // The area checks judge the WHOLE outline, even when the carve was cut down
+  // to the head: a head band is a fiftieth of the frame on any good capture,
+  // and judged on its own it trips "almost nothing in it" every time.
+  const areas = (wholeViews || views).map((v) => v.sil.area);
   const medH = median(views.map((v) => v.sil.h));
   if (Math.min(...areas) < 0.02) {
     notes.push('one shot has almost nothing in it — take the empty room, or find a plainer wall');
