@@ -311,10 +311,38 @@ synthesis: rAF never fires in a hidden pane, so the recording is driven by
 `captureStream(0)` + `requestFrame()` on a timeout loop; and a MediaRecorder
 blob reports Infinity for its duration until pushed to its end.
 
+**The still-picker compares outlines LINED UP ON THE HEAD, and a handheld
+video is why.** A phone that is held rather than propped wanders a few pixels
+between stills, and compared in place that wander IS a 4.5% change — so every
+still clears the bar, one pose is kept three times, and three copies of a pose
+eat forty degrees of the circle each. Measured with ±8px of synthetic drift:
+twenty-seven "turns" from eight poses, angles thirteen degrees apart, and a
+carve of nothing — which on a real capture came back as a false cylinder that
+LOOKED like the angles being reversed. (They were not: a video of the person
+turning the other way recovers 0, 315, 270… exactly.) Aligning the comparison
+on `headX`/`y` before differencing gives eight stills, exact angles, and the
+clean hull to within one per cent. Two other drift products are dropped
+outright, counted, and said out loud: a full-height SLIVER of an outline
+(the shifted frame's own edge, i.e. the empty room kept as a turn — caught
+because a person fills a decent share of their bounding box and a sliver does
+not, `boxFill < 0.15`) and a still where over half the frame reads as person
+(the camera moved outright, `area > 0.55` — the same line `report` draws).
+
 One honest limit, stated in the UI: the pile is read as ONE long turn, so a
 second video must carry on from where the last stopped, not start the circle
-again. Live camera (getUserMedia) needs a secure origin and a home http
+again. And a video that opens with the person already in frame poisons the
+plate — the carve cannot be saved, only diagnosed, which the notes now do.
+Live camera (getUserMedia) needs a secure origin and a home http
 server is not one — the recording is the same pixels, retakeable.
+
+**`report` says only true things, which took two fixes.** "It will be ignored
+meanwhile" about an odd-sized view was a promise the code did not keep — the
+view carved with everyone else. `buildBtn` now really does drop views whose
+outline height is more than 14% off the median, while at least three agreeing
+views remain. And the "almost nothing in it" area check judges the WHOLE
+outline even when the carve was cut down to the head, because a head band is
+a fiftieth of the frame on any good capture and judged on its own it tripped
+that note every time, on perfect sets.
 
 **Four turns is the minimum and eight is the point.** With four, every
 cross-section of the hull is a square, so shoulders come out with corners on

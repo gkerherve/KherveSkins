@@ -727,27 +727,52 @@ async function addVideo(file) {
     }
     const plate = cap.plate.photo;
 
-    // how different two outlines are: pixels in one and not the other, over
-    // pixels in either — nought for the same pose, and it grows as they turn
+    // How different two outlines are: pixels in one and not the other, over
+    // pixels in either — nought for the same pose, and it grows as they turn.
+    //
+    // Compared AFTER lining the two up on the head. A handheld phone drifts a
+    // few pixels between stills, and compared in place that drift IS a change:
+    // every still clears the 4.5% bar, the same pose is kept three times, and
+    // three copies of one pose eat forty degrees of the circle each — measured,
+    // ±8px of wander turned eight poses into twenty-seven "turns" and the carve
+    // into nothing. The head is the anchor because it is what the whole carve
+    // lines up on: a person turning keeps their head over the axis.
     const differs = (a, b) => {
       if (!a || !b || a.mw !== b.mw || a.mh !== b.mh) return 1;
+      const dx = Math.round(b.headX - a.headX);
+      const dy = b.y - a.y;
       let xor = 0, or = 0;
-      for (let i = 0; i < a.mask.length; i++) {
-        const p = a.mask[i], q = b.mask[i];
-        if (p || q) { or++; if (p !== q) xor++; }
+      for (let y = 0; y < a.mh; y++) {
+        const by = y + dy;
+        for (let x = 0; x < a.mw; x++) {
+          const p = a.mask[y * a.mw + x];
+          const bx = x + dx;
+          const q = (bx >= 0 && by >= 0 && bx < b.mw && by < b.mh)
+            ? b.mask[by * b.mw + bx] : 0;
+          if (p || q) { or++; if (p !== q) xor++; }
+        }
       }
       return or ? xor / or : 0;
     };
 
     const end = D - 0.15;
     const n = Math.max(10, Math.min(30, Math.round((end - start) * 2.5)));
-    let kept = 0, lastSil = null;
+    let kept = 0, dropped = 0, lastSil = null;
     say('capSay', `reading the video — 0 of ${n} stills…`);
     for (let i = 0; i < n; i++) {
       const t = start + (end - start) * (i / Math.max(1, n - 1));
       const photo = await grab(t);
       const sil = silhouette(photo, plate);
       if (!sil || sil.area < 0.008) continue;          // nobody in frame yet
+      // A person fills a decent share of their own bounding box; camera drift
+      // does not. A frame shifted against the plate differs along its whole
+      // edge, which comes back as a full-height sliver of an outline — an
+      // "outline" with a box the size of the frame and almost nothing in it.
+      // Kept, each sliver is a phantom turn of the EMPTY ROOM. And a frame
+      // where over half the picture reads as person is not a person either —
+      // the camera moved outright, or the room was never empty.
+      const boxFill = (sil.area * sil.mw * sil.mh) / Math.max(1, sil.w * sil.h);
+      if (boxFill < 0.15 || sil.area > 0.55) { dropped++; continue; }
       if (lastSil && differs(sil, lastSil) < 0.045) continue;   // not turned yet
       lastSil = sil;
       cap.turns.push({ photo, name: `video at ${t.toFixed(1)}s` });
@@ -763,11 +788,16 @@ async function addVideo(file) {
     cap.flip = undefined;
     reread();
     if (kept < 3 && cap.turns.length < 3) {
-      say('capSay', 'the video never showed anybody turning — was the room empty '
-        + 'when it started, and did you step in?', 'bad');
+      say('capSay', dropped >= 3
+        ? 'the camera moved during that video — prop the phone on something '
+          + 'still, start recording on the empty room, then step in and turn'
+        : 'the video never showed anybody turning — was the room empty '
+          + 'when it started, and did you step in?', 'bad');
       return;
     }
-    say('capSay', `${kept} turns pulled from the video — building…`, 'good');
+    say('capSay', `${kept} turns pulled from the video`
+      + (dropped ? ` (${dropped} still${dropped === 1 ? '' : 's'} unusable — the camera moved)` : '')
+      + ' — building…', 'good');
     // and the volume appears without another press, which is the point
     $('buildBtn').click();
   } catch (e) {
