@@ -23,7 +23,18 @@ import { Cropper } from './cropper.js';
 import { Painter } from './paint.js';
 import * as store from './store.js';
 import { parts, regions, SIZES, BASE } from './layout.js';
-import { CATEGORIES, DEFAULT_WEAR, EXTRA_COLOURS } from './wardrobe.js';
+import { CATEGORIES, DEFAULT_WEAR, EXTRA_COLOURS, OUTFITS,
+  // the fire: drawn after everything, with a tick, through one door
+  applyEffects } from './wardrobe.js';
+import { parts as layoutParts } from './layout.js';
+
+// The parts as the wardrobe's items expect them: keyed by name, not a list —
+// the same shape generate.js hands to dressUp.
+function modelParts(slim, size) {
+  const P = {};
+  for (const p of layoutParts(slim, size)) P[p.key] = p;
+  return P;
+}
 import { drawDoll, CROPS } from './doll.js';
 import { silhouette, carve, report, headOf } from './carve.js';
 import { facesFromViews, primeHeuristic } from './faces3d.js';
@@ -192,9 +203,32 @@ function rebuild() {
     S.pal = blank(S.skin, S.opts);
   }
   replay();
+  // THE FIRE GOES ON LAST, and the man underneath it is remembered. Effects
+  // are the one wardrobe category dressUp does not draw: they burn over the
+  // jacket, and they are drawn again every few beats with a fresh tick so
+  // the dressing room shows them ALIVE — restore the snapshot, move the
+  // tongues, and nothing under the fire is ever lost. Every exported PNG is
+  // whatever frame the fire was on: one static, fully Minecraft-compatible
+  // file.
+  S.preFx = S.skin.snapshot();
+  applyEffects(S.skin, S.opts.wear,
+    { parts: modelParts(S.opts.slim, S.skin.size) }, S.fxTick ?? 0);
   refresh();
   drawSwatches();
 }
+
+// The burn. Runs always and costs nothing when no effect is worn; when one
+// is, the skin flickers at a slow candle rate — fast enough to live, slow
+// enough that the painter underneath it stays usable.
+setInterval(() => {
+  if (!S.preFx || !(S.opts.wear?.effects?.length)) return;
+  S.fxTick = ((S.fxTick ?? 0) + 1) % 1024;
+  S.skin.restore(S.preFx);
+  replay();
+  applyEffects(S.skin, S.opts.wear,
+    { parts: modelParts(S.opts.slim, S.skin.size) }, S.fxTick);
+  refresh();
+}, 420);
 
 /** Every texel somebody laid by hand, put back where they put it. */
 function replay() {
@@ -991,7 +1025,8 @@ function thumbFor(cat, it) {
   const had = thumbCache.get(key);
   if (had) return had;
   const s = new Skin(BASE);
-  const wear = { ...S.opts.wear, [cat.key]: it.id };
+  const wear = { ...S.opts.wear,
+    [cat.key]: cat.multi ? [it.id] : it.id };
   // Whatever would COVER the thing being chosen comes off first. A hood is
   // outerwear and it sits on the head, so a coat left on turns fifty
   // haircuts into fifty identical hoods — which is exactly what it did.
@@ -1012,6 +1047,9 @@ function thumbFor(cat, it) {
       shoes: rgbOf('shoes') || '#2b2521',
     },
   });
+  // ...and the fire, which dressUp leaves to this one door. Tick 0: a
+  // thumbnail is one honest frame of it.
+  applyEffects(s, wear, { parts: modelParts(S.opts.slim, BASE) }, 0);
   const c = document.createElement('canvas');
   c.width = 128; c.height = 128;
   drawDoll(c.getContext('2d'), s, S.opts.slim, CROPS[cat.shows] || CROPS.all, cat.key === 'back');
@@ -1040,6 +1078,16 @@ function drawTree() {
     value: () => `${S.skin.size}px · ${S.opts.slim ? 'slim' : 'classic'}`,
     body: styleBody,
   }));
+  // READY-MADE PEOPLE, at the top and above the drawers. A room full of
+  // drawers and no examples is a room you close again: this is fifteen
+  // finished people built out of those same drawers, and picking one dresses
+  // you head to foot and leaves every drawer there to change your mind with.
+  host.appendChild(branch({
+    key: '__outfits',
+    name: 'Ready-made',
+    value: () => `${OUTFITS.length} people`,
+    body: outfitBody,
+  }));
   for (const cat of CATEGORIES) {
     host.appendChild(branch({
       key: cat.key,
@@ -1047,6 +1095,9 @@ function drawTree() {
       cat,
       value: () => {
         const id = (S.opts.wear || {})[cat.key];
+        if (Array.isArray(id)) {
+          return id.length ? `${id.length} burning` : 'none';
+        }
         if (!id || id === 'auto') return 'from the photo';
         const it = cat.items.find((x) => x.id === id);
         return it ? it.name : 'none';
@@ -1054,6 +1105,128 @@ function drawTree() {
       body: () => rackBody(cat),
     }));
   }
+}
+
+// The gallery. One picture apiece, built the same way every other thumbnail
+// here is — against YOUR face and skin tone, so what you are looking at is
+// you in that outfit rather than a stranger in it.
+function outfitBody() {
+  const wrap = document.createElement('div');
+  const bar = document.createElement('div');
+  bar.className = 'rackbar';
+  bar.appendChild(document.createElement('span')).textContent =
+    `${OUTFITS.length} finished people — pick one and change your mind after`;
+  // YOUR FACE ON TOP OF IT. An outfit sets a skin tone as well as clothes —
+  // that is what makes a zombie green and a ghost grey — and with a
+  // photograph loaded that would paint over the one thing you came here for.
+  // So: keep the clothes, keep your face. Off gives you the monster whole.
+  const keep = document.createElement('label');
+  keep.className = 'keepface';
+  const box = document.createElement('input');
+  box.type = 'checkbox';
+  box.checked = S.keepFace !== false;
+  box.onchange = () => {
+    S.keepFace = box.checked;
+    thumbCache.clear();
+    rebuild();
+    fillOutfits(grid);
+  };
+  keep.append(box, document.createTextNode('keep my face'));
+  bar.appendChild(keep);
+  const grid = document.createElement('div');
+  grid.className = 'grid';
+  wrap.append(bar, grid);
+
+  fillOutfits(grid);
+  return wrap;
+}
+
+// The gallery grid, refilled when "keep my face" changes because every
+// picture in it is drawn one way or the other.
+function fillOutfits(grid) {
+  grid.textContent = '';
+  const cells = OUTFITS.map((o) => {
+    const cell = document.createElement('div');
+    cell.className = 'wear';
+    const img = document.createElement('img');
+    img.width = 64;
+    img.height = 64;
+    img.alt = '';
+    const b = document.createElement('b');
+    b.textContent = o.name;
+    cell.append(img, b);
+    cell.onclick = () => {
+      // A whole person at once, REPLACING the last one. This used to merge
+      // the outfit's colours over whatever was there, so outfits accumulated:
+      // pick the zombie and then the angel and the angel kept the zombie's
+      // green face. What survives a change of outfit is exactly one thing —
+      // your own face, when a photograph is loaded and "keep my face" is on.
+      // The drawers are all still there to change details afterwards.
+      S.opts.wear = { ...DEFAULT_WEAR, ...o.wear };
+      const keepSkin = (S.keepFace !== false && (S.photo || S.base))
+        ? { skin: (S.opts.colours || {}).skin } : {};
+      S.opts.colours = { ...outfitColours(o), ...keepSkin };
+      thumbCache.clear();
+      rebuild();
+      for (const other of grid.children) other.classList.remove('on');
+      cell.classList.add('on');
+      refreshTwigs();
+      keepPrefs();
+    };
+    grid.appendChild(cell);
+    return { o, img };
+  });
+
+  // Painted a few at a time, for the reason fillGrid gives: a couple of dozen
+  // little skins generated in one go is a page that stops answering.
+  const token = String(Date.now()) + Math.random();
+  grid.dataset.fill = token;
+  let i = 0;
+  const chunk = () => {
+    if (grid.dataset.fill !== token) return;
+    const until = Math.min(i + 3, cells.length);
+    for (; i < until; i++) cells[i].img.src = outfitThumb(cells[i].o);
+    if (i < cells.length) setTimeout(chunk, 0);
+  };
+  chunk();
+}
+
+// What an outfit paints, given whether you are keeping your own face.
+//
+// `skin` is the flesh — the face AND the arms and legs — so it is the one
+// colour an outfit must not force on somebody who has loaded a photograph of
+// themselves. Everything else is clothes and hair, which is what you picked
+// the outfit for.
+function outfitColours(o) {
+  const c = { ...(o.colours || {}) };
+  if (S.keepFace !== false && (S.photo || S.base)) delete c.skin;
+  return c;
+}
+
+function outfitThumb(o) {
+  const key = `${thumbKey()}|outfit|${o.id}`;
+  const had = thumbCache.get(key);
+  if (had) return had;
+  const s = new Skin(BASE);
+  blank(s, {
+    ...S.opts,
+    size: BASE,
+    wear: { ...DEFAULT_WEAR, ...o.wear },
+    grain: 0.12,
+    // The outfit's own palette, whole, with your face over it when you are
+    // keeping it — the same rule the click applies, so the picture is the
+    // person you would get.
+    colours: {
+      skin: rgbOf('skin') || '#e0ac7e',
+      ...outfitColours(o),
+    },
+  });
+  const c = document.createElement('canvas');
+  c.width = 128; c.height = 128;
+  drawDoll(c.getContext('2d'), s, S.opts.slim, CROPS.all, false);
+  const url = c.toDataURL('image/png');
+  thumbCache.set(key, url);
+  return url;
 }
 
 function branch(spec) {
@@ -1141,6 +1314,9 @@ function rackBody(cat) {
   const colour = document.createElement('input');
   colour.type = 'color';
   colour.title = 'colour';
+  // fire is fire: the effects carry their own ramps and a swatch that did
+  // nothing would be a lie about what the rack can do
+  if (cat.multi) colour.style.display = 'none';
   colour.value = rgbOf(cat.colour) || EXTRA_COLOURS[cat.colour] || '#888888';
   colour.oninput = () => {
     S.opts.colours[cat.colour] = colour.value;
@@ -1168,13 +1344,16 @@ function rackBody(cat) {
 function fillGrid(grid, cat) {
   grid.textContent = '';
   const chosen = (S.opts.wear || {})[cat.key];
+  const worn = (it) => (cat.multi
+    ? Array.isArray(chosen) && chosen.includes(it.id)
+    : it.id === chosen);
   const list = [...cat.items];
   if (['top', 'bottom', 'footwear', 'hair'].includes(cat.key)) {
     list.unshift({ id: 'auto', name: 'From the photo' });
   }
   const cells = list.map((it) => {
     const cell = document.createElement('div');
-    cell.className = `wear${it.id === chosen ? ' on' : ''}`;
+    cell.className = `wear${worn(it) ? ' on' : ''}`;
     const img = document.createElement('img');
     img.alt = it.name;
     img.width = 64;
@@ -1183,10 +1362,22 @@ function fillGrid(grid, cat) {
     b.textContent = it.name;
     cell.append(img, b);
     cell.onclick = () => {
-      S.opts.wear = { ...S.opts.wear, [cat.key]: it.id };
-      rebuild();
-      for (const other of grid.children) other.classList.remove('on');
-      cell.classList.add('on');
+      if (cat.multi) {
+        // TOGGLES, because the whole point of the category is stacking:
+        // flaming arms AND frosted legs is a fair thing to want, and any
+        // number of them still flatten into the one overlay the PNG has.
+        const now = new Set(Array.isArray(chosen)
+          ? (S.opts.wear[cat.key] ?? []) : []);
+        now.has(it.id) ? now.delete(it.id) : now.add(it.id);
+        S.opts.wear = { ...S.opts.wear, [cat.key]: [...now] };
+        rebuild();
+        cell.classList.toggle('on');
+      } else {
+        S.opts.wear = { ...S.opts.wear, [cat.key]: it.id };
+        rebuild();
+        for (const other of grid.children) other.classList.remove('on');
+        cell.classList.add('on');
+      }
       refreshTwigs();
       keepPrefs();
     };
@@ -1642,6 +1833,17 @@ Object.assign(window, {
     return { ...S.opts.wear };
   },
   __cats: () => CATEGORIES.map((c) => ({ key: c.key, n: c.items.length })),
+  // The ready-made gallery, and whether an outfit would repaint your face.
+  // A photograph is the one thing a check cannot supply, so this answers the
+  // question the photograph decides: with a face loaded and `keep my face`
+  // ticked, does the outfit still force its own flesh colour?
+  __outfits: () => OUTFITS.map((o) => o.id),
+  __wouldPaintFace: (id) => {
+    const o = OUTFITS.find((x) => x.id === id);
+    return o ? 'skin' in outfitColours(o) : null;
+  },
+  __setFaceLoaded: (on) => { S.base = on ? (S.base || {}) : null; return !!S.base; },
+  __keepFace: (on) => { S.keepFace = on; return S.keepFace; },
   __openCat: (k) => {
     const wrap = document.querySelector(`#tree .branch[data-key="${k}"]`);
     if (wrap && !wrap.classList.contains('open')) wrap.querySelector('.twig').click();
@@ -1733,3 +1935,48 @@ Object.assign(window, {
     }
   },
 });
+
+// ---------------------------------------------------------------------------
+// PlanetCraft.
+//
+// When this page is embedded in the game's own window (the skin-maker
+// overlay), "done" means one more thing than a download: put the skin ON.
+// The button posts the finished PNG and the arm choice to the parent page,
+// which dresses the player and closes the overlay. Standalone, the button
+// stays hidden and the app is exactly the app.
+if (window.parent !== window) {
+  const wear = $('wearBtn');
+  if (wear) {
+    wear.hidden = false;
+    wear.onclick = () => {
+      // A BURNING SKIN GOES OVER AS FRAMES. Each one is rendered exactly the
+      // way the room renders its own flicker — restore the man, move the
+      // fire, photograph — so every frame is a complete, ordinary 64x64 PNG
+      // and the game animates by swapping them. A skin with no effects sends
+      // one picture, as it always did.
+      let frames = null;
+      if (S.preFx && S.opts.wear?.effects?.length) {
+        frames = [];
+        const P = modelParts(S.opts.slim, S.skin.size);
+        for (let t = 0; t < 6; t++) {
+          S.skin.restore(S.preFx);
+          replay();
+          applyEffects(S.skin, S.opts.wear, { parts: P }, t);
+          frames.push(S.skin.toDataURL());
+        }
+        // ...and the room's own fire carries on from where it was
+        S.skin.restore(S.preFx);
+        replay();
+        applyEffects(S.skin, S.opts.wear, { parts: P }, S.fxTick ?? 0);
+        refresh();
+      }
+      window.parent.postMessage({
+        type: 'kherveskins.wear',
+        png: frames ? frames[0] : S.skin.toDataURL(),
+        slim: !!S.opts.slim,
+        name: S.name || 'my-skin',
+        frames,
+      }, '*');
+    };
+  }
+}

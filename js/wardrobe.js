@@ -1118,6 +1118,167 @@ export const BACK_ITEMS = [
 // over by a collar. Anything that draws on the outer layer draws after
 // everything that draws on the skin underneath it.
 
+// ===========================================================================
+// effects — the skin set on fire
+// ===========================================================================
+//
+// The "alive" skins you see in Minecraft — arms wreathed in flame, frost
+// crawling up the legs — are not a third layer, because the format has no
+// third layer: they are the OVERLAY, used as air. The overlay floats half a
+// texel off the body, so a jagged tongue of orange painted on it with
+// transparency around it reads as fire licking the limb, not as a sleeve.
+//
+// So effects are ordinary items with three deliberate differences. They are
+// a LIST, not a slot — flaming arms AND frosted legs is a fair thing to want,
+// which is the "more extra layers" idea: any number of them stack in the
+// editor and flatten into the one overlay the PNG has, so the file stays a
+// plain Minecraft skin. They draw LAST, over the jacket, because fire is on
+// top of everything. And they take a TICK: drawn again with a different tick
+// the tongues move, which is what lets the dressing room show the fire
+// burning — every exported frame is still one static, compatible PNG.
+//
+// Nothing here writes a transparent texel. A flame paints only where the
+// flame is, so whatever it burns over — a sleeve, bare skin — survives
+// underneath and around it.
+
+const FIRE_RAMP = ['#fff6c8', '#ffd94e', '#ff9422', '#e8501c', '#9c2412']
+  .map(hexToRgb);
+const FROST_RAMP = ['#ffffff', '#d8f2fe', '#9adcf8', '#58b0e4', '#2f74b0']
+  .map(hexToRgb);
+
+// Tongues of flame up a box part, from the far end toward the near.
+// `fromBottom` true burns up from the wrist or ankle; false burns down from
+// the shoulder line (used for the body's collar of fire).
+function blaze(skin, part, ramp, salt, tick, o = {}) {
+  const height = o.height ?? 0.55;      // how far up the limb the fire reaches
+  const vary = o.vary ?? 0.35;          // how ragged the tongues are
+  const seed = salt * 31 + (tick % 8) * 977;
+  for (const face of ['right', 'front', 'left', 'back']) {
+    const r = part.overRects[face];
+    const [, , w, h] = r;
+    skin.mapRect(r, (u, v, cur) => {
+      // distance from the burning end, 0..1 up the limb
+      const d = (h - 1 - v + 0.5) / h;
+      const tongue = height * (1 - vary + jitter(u, face.length, seed) * 2 * vary);
+      if (d > tongue) return cur;
+      // hottest at the source, dark red at the tips, and the tip texel of
+      // every tongue flickers a step hotter so the edge sparkles
+      let k = Math.min(ramp.length - 1, Math.floor((d / tongue) * ramp.length));
+      if (d > tongue * 0.8 && jitter(u, v, seed + 7) < 0.3) k = 1;
+      // holes in the body of the fire, so it reads as flame and not as paint
+      if (k >= 2 && jitter(u, v, seed + 13) < 0.16) return cur;
+      return [...ramp[k].slice(0, 3), 255];
+    });
+  }
+  // the underside — the palm of the fire — burns solid hot
+  const b = part.overRects.bottom;
+  if (b) skin.fillRect(b, [...FIRE_RAMP[0].slice(0, 3), 255]);
+}
+
+// Frost is fire's opposite in more than colour: it CLIMBS from the same end
+// but in crystals, not tongues — hard-edged steps rather than ragged licks.
+function rime(skin, part, salt, tick) {
+  const seed = salt * 53 + (tick % 8) * 631;
+  for (const face of ['right', 'front', 'left', 'back']) {
+    const r = part.overRects[face];
+    const [, , w, h] = r;
+    skin.mapRect(r, (u, v, cur) => {
+      const d = (h - 1 - v + 0.5) / h;
+      // stepped, so the edge is crystalline: each column's reach snaps to
+      // quarters of the limb
+      const reach = (1 + Math.floor(jitter(u, face.length, seed) * 3)) * 0.16;
+      if (d > reach) return cur;
+      const k = Math.min(FROST_RAMP.length - 1,
+        Math.floor((d / reach) * FROST_RAMP.length));
+      if (k >= 3 && jitter(u, v, seed + 5) < 0.2) return cur;
+      return [...FROST_RAMP[k].slice(0, 3), 255];
+    });
+  }
+  const b = part.overRects.bottom;
+  if (b) skin.fillRect(b, [...FROST_RAMP[1].slice(0, 3), 255]);
+}
+
+export const EFFECTS = [
+  { id: 'flamearms', name: 'Arms aflame',
+    draw(skin, c) {
+      blaze(skin, c.parts.armR, FIRE_RAMP, 1, c.tick ?? 0);
+      blaze(skin, c.parts.armL, FIRE_RAMP, 2, c.tick ?? 0);
+    } },
+  { id: 'flamelegs', name: 'Legs aflame',
+    draw(skin, c) {
+      blaze(skin, c.parts.legR, FIRE_RAMP, 3, c.tick ?? 0, { height: 0.6 });
+      blaze(skin, c.parts.legL, FIRE_RAMP, 4, c.tick ?? 0, { height: 0.6 });
+    } },
+  { id: 'frostarms', name: 'Frosted arms',
+    draw(skin, c) {
+      rime(skin, c.parts.armR, 5, c.tick ?? 0);
+      rime(skin, c.parts.armL, 6, c.tick ?? 0);
+    } },
+  { id: 'frostlegs', name: 'Frosted legs',
+    draw(skin, c) {
+      rime(skin, c.parts.legR, 7, c.tick ?? 0);
+      rime(skin, c.parts.legL, 8, c.tick ?? 0);
+    } },
+  // Embers: the body smoulders — sparse glowing coals over the torso, dense
+  // at the waist and thinning upward, the way a burnt thing cools.
+  { id: 'embers', name: 'Smouldering',
+    draw(skin, c) {
+      const seed = 11 * 31 + ((c.tick ?? 0) % 8) * 977;
+      for (const face of ['front', 'back', 'right', 'left']) {
+        const r = c.parts.body.overRects[face];
+        const [, , , h] = r;
+        skin.mapRect(r, (u, v, cur) => {
+          const d = (v + 0.5) / h;                     // 0 collar, 1 waist
+          const glow = jitter(u, v, seed);
+          if (glow > 0.10 + d * 0.16) return cur;
+          const k = glow < 0.05 ? 1 : glow < 0.09 ? 2 : 3;
+          return [...FIRE_RAMP[k].slice(0, 3), 255];
+        });
+      }
+    } },
+  // Lightning: two or three white-cored bolts crawling down each arm. The
+  // bolt is a walk — one texel a row, jinking by jitter — which is what a
+  // spark actually looks like at this resolution.
+  { id: 'sparks', name: 'Crackling',
+    draw(skin, c) {
+      const tick = c.tick ?? 0;
+      const CORE = hexToRgb('#ffffff');
+      const EDGE = hexToRgb('#6ad4f8');
+      for (const [part, salt] of [[c.parts.armR, 21], [c.parts.armL, 22]]) {
+        for (const face of ['front', 'back', 'right', 'left']) {
+          const r = part.overRects[face];
+          const [, , w, h] = r;
+          const seed = salt * 97 + face.length * 7 + (tick % 8) * 389;
+          let x = Math.floor(jitter(0, 0, seed) * w);
+          const px = [];
+          for (let v = 0; v < h; v++) {
+            x += Math.floor(jitter(1, v, seed) * 3) - 1;
+            x = ((x % w) + w) % w;
+            px.push(x);
+          }
+          skin.mapRect(r, (u, v, cur) => {
+            if (u === px[v]) return [...CORE.slice(0, 3), 255];
+            if (Math.abs(u - px[v]) === 1 && jitter(u, v, seed + 3) < 0.5) {
+              return [...EDGE.slice(0, 3), 255];
+            }
+            return cur;
+          });
+        }
+      }
+    } },
+];
+
+// The list an effect id is looked up in — dressUp skips the whole category
+// (see applyEffects), so this is the one door they are drawn through.
+export function applyEffects(skin, wear, ctx, tick = 0) {
+  const list = (wear || {}).effects;
+  if (!Array.isArray(list)) return;
+  for (const id of list) {
+    const it = EFFECTS.find((x) => x.id === id);
+    it?.draw?.(skin, { ...ctx, tick });
+  }
+}
+
 export const CATEGORIES = [
   { key: 'hair', name: 'Hair', items: HAIR, colour: 'hair', shows: 'head' },
   { key: 'top', name: 'Tops', items: TOPS, colour: 'shirt', shows: 'torso' },
@@ -1128,6 +1289,11 @@ export const CATEGORIES = [
   { key: 'footwear', name: 'Footwear', items: FOOTWEAR, colour: 'shoes', shows: 'legs' },
   { key: 'face', name: 'Face Items', items: FACE_ITEMS, colour: 'face', shows: 'head' },
   { key: 'back', name: 'Back Items', items: BACK_ITEMS, colour: 'back', shows: 'back' },
+  // A LIST, not a slot — see the effects block above. `multi` is what tells
+  // the racks to toggle rather than choose, and dressUp to leave the whole
+  // category to applyEffects.
+  { key: 'effects', name: 'Effects', items: EFFECTS, colour: 'effects',
+    shows: 'all', multi: true },
 ];
 
 /** Sensible starting colours for the categories the photograph cannot answer. */
@@ -1140,6 +1306,7 @@ export const EXTRA_COLOURS = {
 };
 
 export const DEFAULT_WEAR = {
+  effects: [],
   hair: 'auto',
   top: 'auto',
   bottom: 'auto',
@@ -1150,6 +1317,409 @@ export const DEFAULT_WEAR = {
   face: 'none',
   back: 'none',
 };
+
+// ---- READY-MADE PEOPLE -------------------------------------------------------
+//
+// The wardrobe is a set of parts and it makes anybody, which is the right way
+// round and a poor way to START: a room full of drawers and no examples is a
+// room you close again. These are finished people, built out of the same
+// drawers — pick one and it dresses you head to foot, and then every drawer
+// is still there to change your mind with.
+//
+// Nothing here is a new drawing. Each is a `wear` (one item per category) and
+// the colours to paint them, so the whole gallery costs a table and adding
+// another is four lines.
+export const OUTFITS = [
+  // Every outfit names EVERY slot and every colour, deliberately. The first
+  // draft named only what it cared about, and the rest leaked in from
+  // whatever you were wearing before — pick the zombie and then the angel and
+  // the angel had a green face. A finished person is finished: nothing about
+  // them is left to chance, and switching between them is switching whole.
+  //
+  // Each of these is designed to be READ AT A GLANCE, off a 64-pixel
+  // thumbnail: one silhouette and two or three colour masses that say who it
+  // is before the name does. So every outfit picks a dominant colour, a
+  // support and one accent, keeps a value step between shirt, outer and
+  // trousers so the body reads as layers, and the humans get skins from
+  // across the whole range rather than one default tan — a gallery of one
+  // complexion is a palette mistake wearing thirty costumes.
+
+  { id: 'angel', name: 'Angel',
+    wear: { hair: 'longwave', top: 'robe', bottom: 'longskirt', outer: 'none',
+      headwear: 'circlet', gloves: 'none', footwear: 'sandals',
+      face: 'none', back: 'wings' },
+    colours: { skin: '#f2d6b8', hair: '#f0dfa8', shirt: '#fdfcf7',
+      trousers: '#efeadd', headwear: '#f2cf5e', shoes: '#dcd2ba',
+      back: '#ffffff' } },
+
+  // RED, head to foot. A demon in a dark coat is a man having a bad day; a
+  // demon is red the way a zombie is green — the flesh is the costume. The
+  // horns stay bone so they read against the red instead of sinking into it.
+  { id: 'demon', name: 'Demon',
+    wear: { hair: 'spiky', top: 'tank', bottom: 'ripped', outer: 'cloak',
+      headwear: 'horns', gloves: 'none', footwear: 'none',
+      face: 'goatee', back: 'none' },
+    colours: { skin: '#a83226', hair: '#1c0e0c', shirt: '#2a1214',
+      trousers: '#361418', outer: '#4a1216', headwear: '#efe6d2',
+      face: '#1c0e0c' } },
+
+  // Gold where the angel is white — the cloak and the crown are what stop
+  // two white-robed blonds being the same thumbnail twice.
+  { id: 'god', name: 'God',
+    wear: { hair: 'longwave', top: 'robe', bottom: 'longskirt',
+      outer: 'cloak', headwear: 'crown', gloves: 'none',
+      footwear: 'sandals', face: 'longbeard', back: 'cape' },
+    colours: { skin: '#e0c09e', hair: '#efede4', shirt: '#faf8f0',
+      trousers: '#f2efe4', outer: '#e8c65e', headwear: '#f6dc7c',
+      shoes: '#d6ccb2', face: '#efede4', back: '#f6f3e8' } },
+
+  // The burgundy waistcoat is the accent that stops a second navy suit
+  // reading as a second policeman across the room.
+  { id: 'business', name: 'Business',
+    wear: { hair: 'sidepart', top: 'oxford', bottom: 'suit',
+      outer: 'waistcoat', headwear: 'none', gloves: 'none',
+      footwear: 'brogues', face: 'square', back: 'none' },
+    colours: { skin: '#8d5c34', hair: '#1e1812', shirt: '#f4f6f9',
+      trousers: '#232836', outer: '#45222c', shoes: '#2e1a12',
+      face: '#1c1c22' } },
+
+  // Driving gloves, because a man in his line of work leaves no prints. The
+  // trench sits a full shade lighter than the pinstripe so the coat reads as
+  // a coat and not as more suit.
+  { id: 'gangster', name: 'Gangster',
+    wear: { hair: 'combover', top: 'shirt', bottom: 'pinstripe',
+      outer: 'trench', headwear: 'fedora', gloves: 'driving',
+      footwear: 'brogues', face: 'moustache', back: 'none' },
+    colours: { skin: '#d9a77b', hair: '#241c14', shirt: '#ece5d4',
+      trousers: '#262630', outer: '#4a4238', headwear: '#211c17',
+      gloves: '#2e2018', shoes: '#1e1610', face: '#241c14' } },
+
+  // The scrubs are a proper teal, not a pale one: the first draft was
+  // nearly white and vanished into the angel and the bride-in-waiting at
+  // thumbnail size. The cap stays white — that is the one white she keeps.
+  { id: 'nurse', name: 'Nurse',
+    wear: { hair: 'bun', top: 'tunic', bottom: 'trousers', outer: 'none',
+      headwear: 'nursecap', gloves: 'none', footwear: 'plimsolls',
+      face: 'none', back: 'none' },
+    colours: { skin: '#b5794e', hair: '#3a2a1c', shirt: '#7fb8be',
+      trousers: '#689fa8', headwear: '#ffffff', shoes: '#f2f2ef' } },
+
+  // Silver wire-rims, deliberately: dark frames on dark skin disappear, and
+  // a doctor with no glasses is just a man in a nice coat.
+  { id: 'doctor', name: 'Doctor',
+    wear: { hair: 'crop', top: 'oxford', bottom: 'chinos', outer: 'labcoat',
+      headwear: 'none', gloves: 'none', footwear: 'shoes',
+      face: 'glasses', back: 'none' },
+    colours: { skin: '#6f452a', hair: '#181209', shirt: '#b8d0e8',
+      trousers: '#333c4c', outer: '#f8f9fa', shoes: '#26201a',
+      face: '#d5dade' } },
+
+  { id: 'fireman', name: 'Fire crew',
+    wear: { hair: 'buzz', top: 'work', bottom: 'combat', outer: 'hivis',
+      headwear: 'helm', gloves: 'gauntlets', footwear: 'steel',
+      face: 'none', back: 'airtank' },
+    colours: { skin: '#e2b088', hair: '#2a2018', shirt: '#3a3f46',
+      trousers: '#2c3138', outer: '#e8b71e', headwear: '#c8402c',
+      gloves: '#3a3028', shoes: '#221d19', back: '#c2c6cc' } },
+
+  // Navy, cap, shades. The shirt is a step lighter than the gilet so the
+  // vest reads as armour over cloth rather than one slab of dark.
+  { id: 'cop', name: 'Police',
+    wear: { hair: 'crew', top: 'shirt', bottom: 'trousers', outer: 'gilet',
+      headwear: 'cap', gloves: 'none', footwear: 'boots',
+      face: 'shades', back: 'none' },
+    colours: { skin: '#c99e76', hair: '#241e16', shirt: '#46587c',
+      trousers: '#202632', outer: '#181f2c', headwear: '#181f2c',
+      shoes: '#1a1612', face: '#141418' } },
+
+  // Cream roll-neck, rust cardigan, deep teal skirt: three values and a
+  // warm-against-cool pair, where the first draft was three browns that
+  // read as one tweedy smudge.
+  { id: 'teacher', name: 'Teacher',
+    wear: { hair: 'lob', top: 'roll', bottom: 'longskirt',
+      outer: 'cardigan', headwear: 'none', gloves: 'none',
+      footwear: 'loafers', face: 'round', back: 'satchel' },
+    colours: { skin: '#a06a42', hair: '#6a4526', shirt: '#e8dfc8',
+      trousers: '#2e4a4a', outer: '#9c5230', shoes: '#4a2e1c',
+      face: '#4a3424', back: '#8a5c34' } },
+
+  // Space buns and a loud tee under the coat — the doctor wears the
+  // uniform, the scientist wears whatever was clean. The blue rubber
+  // gloves are the tell at a distance.
+  { id: 'scientist', name: 'Scientist',
+    wear: { hair: 'spacebuns', top: 'tee', bottom: 'chinos',
+      outer: 'labcoat', headwear: 'none', gloves: 'rubber',
+      footwear: 'shoes', face: 'goggles', back: 'none' },
+    colours: { skin: '#e8c29c', hair: '#2e2018', shirt: '#c2452e',
+      trousers: '#565e6a', outer: '#f5f7f8', gloves: '#a8d2e0',
+      shoes: '#28221c', face: '#2e5a68' } },
+
+  // The white dress and the platinum wave, which is the picture everybody
+  // has of her. Built out of the same drawers as everything else here —
+  // the red lips are the accent doing all the work against the white.
+  { id: 'marilyn', name: 'Marilyn',
+    wear: { hair: 'bobwave', top: 'scoop', bottom: 'longskirt',
+      outer: 'none', headwear: 'none', gloves: 'none', footwear: 'shoes',
+      face: 'lipstick', back: 'none' },
+    colours: { skin: '#f2d0b0', hair: '#f2e4b0', shirt: '#faf8f2',
+      trousers: '#f4f1e8', shoes: '#eae6da', face: '#cc2040' } },
+
+  // Not a portrait of a real man — a lab coat, a shock of white hair and a
+  // walrus moustache, which is the cartoon everybody draws.
+  { id: 'einstein', name: 'Professor',
+    wear: { hair: 'messy', top: 'roll', bottom: 'trousers',
+      outer: 'labcoat', headwear: 'none', gloves: 'none',
+      footwear: 'shoes', face: 'handlebar', back: 'none' },
+    colours: { skin: '#dcb28e', hair: '#f4f3ee', shirt: '#7a7f6c',
+      trousers: '#46423c', outer: '#f4f4f1', shoes: '#2c241e',
+      face: '#eceae2' } },
+
+  // Steel in three values — bright plate, mid mail, dark sabatons — so the
+  // armour reads as pieces and not as one grey man. The cape is the accent.
+  { id: 'knight', name: 'Knight',
+    wear: { hair: 'short', top: 'mail', bottom: 'greaves',
+      outer: 'breastplate', headwear: 'helm', gloves: 'gauntlets',
+      footwear: 'steel', face: 'none', back: 'cape' },
+    colours: { skin: '#d8a87c', hair: '#38281c', shirt: '#7e8692',
+      trousers: '#6e7680', outer: '#b4bcc6', headwear: '#a6aeb8',
+      gloves: '#6e7680', shoes: '#50565e', back: '#a02a24' } },
+
+  { id: 'wizard', name: 'Wizard',
+    wear: { hair: 'long', top: 'robe', bottom: 'longskirt', outer: 'wizard',
+      headwear: 'none', gloves: 'none', footwear: 'boots',
+      face: 'longbeard', back: 'none' },
+    colours: { skin: '#cfa27a', hair: '#e6e4da', shirt: '#3a2f6e',
+      trousers: '#2c2456', outer: '#4c3f8a', shoes: '#2c2218',
+      face: '#e6e4da' } },
+
+  // --- the rest of the world ------------------------------------------------
+  //
+  // Every one of these earned its place the same way: name the one thing
+  // that says who it is — the eyepatch, the gold visor, the horns, the
+  // toque — and check the drawers already hold it. None of them cost a new
+  // drawing; each is the four lines the comment above promised.
+
+  // The eyepatch and the red bandana are the whole read; the breton does
+  // the sailing. The earrings lost the face slot to the eyepatch, which is
+  // the right trade — one eye says pirate, two hoops say market stall.
+  { id: 'pirate', name: 'Pirate',
+    wear: { hair: 'long', top: 'breton', bottom: 'trousers', outer: 'none',
+      headwear: 'bandana', gloves: 'none', footwear: 'tallboots',
+      face: 'eyepatch', back: 'scabbard' },
+    colours: { skin: '#b98a5c', hair: '#241a12', shirt: '#e6dfd0',
+      trousers: '#262c3a', headwear: '#b02a26', shoes: '#2c2014',
+      face: '#16120e', back: '#4a3826' } },
+
+  // Bone horns, red beard, shield on the back. The horns are the same item
+  // the demon wears and the beard is what keeps the two apart — that, and
+  // the demon being red. Historians are asked to look away.
+  { id: 'viking', name: 'Viking',
+    wear: { hair: 'long', top: 'tunic', bottom: 'combat', outer: 'gilet',
+      headwear: 'horns', gloves: 'bracers', footwear: 'boots',
+      face: 'fullbeard', back: 'shield' },
+    colours: { skin: '#e8c4a0', hair: '#b5652c', shirt: '#6a5638',
+      trousers: '#4a3a28', outer: '#7a6448', headwear: '#ded2b8',
+      gloves: '#5a4228', shoes: '#3a2a1a', face: '#a5581f',
+      back: '#8a3a22' } },
+
+  // A white top hat is the nearest thing the drawer has to a toque, and at
+  // sixty-four pixels it IS one. The red neckerchief and the black trousers
+  // are what keep his whites out of the nurse's ward.
+  { id: 'chef', name: 'Chef',
+    wear: { hair: 'crop', top: 'work', bottom: 'trousers', outer: 'scarf',
+      headwear: 'tophat', gloves: 'none', footwear: 'shoes',
+      face: 'moustache', back: 'none' },
+    colours: { skin: '#e2b088', hair: '#3a2a1e', shirt: '#f4f4f0',
+      trousers: '#26262a', outer: '#b02a26', headwear: '#fafaf6',
+      shoes: '#1e1a16', face: '#3a2a1e' } },
+
+  // Black on black on black, with the mask a shade lighter than the hood so
+  // the head reads as two pieces and the eye slit stays an eye slit. The
+  // red hand-wraps are the one colour allowed in, and the socks are tabi.
+  { id: 'ninja', name: 'Ninja',
+    wear: { hair: 'none', top: 'longtee', bottom: 'joggers', outer: 'none',
+      headwear: 'hood', gloves: 'wraps', footwear: 'socks',
+      face: 'facescarf', back: 'scabbard' },
+    colours: { skin: '#caa078', shirt: '#1e2026', trousers: '#171920',
+      headwear: '#191b21', gloves: '#7a2028', shoes: '#14161c',
+      face: '#262830', back: '#30323a' } },
+
+  // The puffer is the pressure suit and the gold visor is the whole read —
+  // it is also what keeps yet another white outfit from being the angel's
+  // or the chef's at thumbnail size. Nobody sees the face behind gold.
+  { id: 'astronaut', name: 'Astronaut',
+    wear: { hair: 'none', top: 'track', bottom: 'track', outer: 'puffer',
+      headwear: 'helm', gloves: 'gloves', footwear: 'boots',
+      face: 'visorface', back: 'airtank' },
+    colours: { skin: '#8a5a38', shirt: '#e8eaee', trousers: '#dfe2e8',
+      outer: '#f2f4f6', headwear: '#eceef2', gloves: '#dfe2e8',
+      shoes: '#9aa2ac', face: '#e8b93c', back: '#c2c6cc' } },
+
+  // Gold collar, white kilt, lapis headcloth, kohl round the eyes — four
+  // colours the whole civilisation agreed on, so they are the four here.
+  // The eyeliner is kohl-black on bronze, where it actually shows.
+  { id: 'pharaoh', name: 'Pharaoh',
+    wear: { hair: 'none', top: 'tank', bottom: 'kilt', outer: 'none',
+      headwear: 'wrap', gloves: 'bracers', footwear: 'sandals',
+      face: 'eyeliner', back: 'none' },
+    colours: { skin: '#b0763f', shirt: '#e0aa38', trousers: '#f2ecda',
+      headwear: '#2a4a9c', gloves: '#d8a232', shoes: '#c89232',
+      face: '#14141c' } },
+
+  // Facepaint, NOT warpaint — warpaint covers the eyes, and a clown with no
+  // eyes is a different genre. Red afro, white face, and primaries below:
+  // the hoops in yellow, the dungarees in blue, the boots in red.
+  { id: 'clown', name: 'Clown',
+    wear: { hair: 'afro', top: 'hooped', bottom: 'dungaree', outer: 'none',
+      headwear: 'none', gloves: 'gloves', footwear: 'boots',
+      face: 'facepaint', back: 'none' },
+    colours: { skin: '#e2b088', hair: '#d43c28', shirt: '#e8c22e',
+      trousers: '#3a6ac8', gloves: '#f4f2ee', shoes: '#c22a20',
+      face: '#f4f2ec' } },
+
+  // The hat and the poncho are the silhouette; everything else is dust
+  // colours. The jeans are the one cool note so the legs read against all
+  // that leather, and the stubble says three days from the nearest town.
+  { id: 'cowboy', name: 'Cowboy',
+    wear: { hair: 'short', top: 'work', bottom: 'jeans', outer: 'poncho',
+      headwear: 'cowboy', gloves: 'none', footwear: 'cowboyboots',
+      face: 'stubble', back: 'none' },
+    colours: { skin: '#c68e5e', hair: '#4a3220', shirt: '#7a4f34',
+      trousers: '#3a4a63', outer: '#9c7a4a', headwear: '#6a4a2a',
+      shoes: '#5c3a1e', face: '#3a2c20' } },
+
+  // The green mohawk is the accent and the silhouette in one. The jacket
+  // sits a shade lighter than the tee so the leather reads as a layer, the
+  // nosering is silver so it shows, and the guitar goes where a knight
+  // keeps his shield.
+  { id: 'punk', name: 'Punk',
+    wear: { hair: 'mohawk', top: 'band', bottom: 'ripped', outer: 'biker',
+      headwear: 'none', gloves: 'fingerless', footwear: 'boots',
+      face: 'nosering', back: 'guitar' },
+    colours: { skin: '#e8c8a8', hair: '#3cb44a', shirt: '#141216',
+      trousers: '#2a2a30', outer: '#26222a', gloves: '#1e1a1e',
+      shoes: '#201c18', face: '#c8ccd2', back: '#7a3a20' } },
+
+  // Crimson gown, gold crown, white opera gloves, purple cape: the royal
+  // colours in the royal order. The crown is the same one the god wears,
+  // and the gown is what keeps the two thrones apart.
+  { id: 'queen', name: 'Queen',
+    wear: { hair: 'ringlets', top: 'robe', bottom: 'longskirt',
+      outer: 'none', headwear: 'crown', gloves: 'opera',
+      footwear: 'shoes', face: 'lipstick', back: 'cape' },
+    colours: { skin: '#7c4c2c', hair: '#2a1c14', shirt: '#7a1830',
+      trousers: '#641226', headwear: '#f2cf5e', gloves: '#f2ede0',
+      shoes: '#3a1420', face: '#c22440', back: '#522a72' } },
+
+  // Straw hat, red plaid, denim dungarees, green wellies — the farm from
+  // fifty yards. The freckles are a shade darker than the skin, which is
+  // the only way freckles ever show on anybody.
+  { id: 'farmer', name: 'Farmer',
+    wear: { hair: 'crop', top: 'plaid', bottom: 'dungaree', outer: 'none',
+      headwear: 'straw', gloves: 'none', footwear: 'wellies',
+      face: 'freckles', back: 'none' },
+    colours: { skin: '#d8a06e', hair: '#b06a34', shirt: '#a03a28',
+      trousers: '#3e5474', headwear: '#d8b866', shoes: '#3a4a2e',
+      face: '#9a6238' } },
+
+  // --- the monsters ---------------------------------------------------------
+  //
+  // The one thing the wardrobe could not do until now was stop being a
+  // PERSON, and the reason was never the clothes: it was the skin. `skin` is
+  // a colour like any other and an outfit may set it, so a monster is the
+  // same drawers with the flesh painted green, grey or bone — which is what a
+  // monster in this art style actually is.
+
+  // The shirt is a cold slate on purpose: the first draft dressed a green
+  // man in green, and at thumbnail size he was one moss-coloured lump.
+  { id: 'zombie', name: 'Zombie',
+    wear: { hair: 'messy', top: 'shirt', bottom: 'ripped', outer: 'none',
+      headwear: 'none', gloves: 'none', footwear: 'shoes',
+      face: 'scar', back: 'none' },
+    colours: { skin: '#6e8a52', hair: '#2f2a20', shirt: '#4a5568',
+      trousers: '#3d3a44', shoes: '#2a2420', face: '#42523a' } },
+
+  { id: 'skeleton', name: 'Skeleton',
+    wear: { hair: 'none', top: 'tank', bottom: 'shorts', outer: 'none',
+      headwear: 'none', gloves: 'none', footwear: 'none',
+      face: 'none', back: 'none' },
+    colours: { skin: '#e8e4d4', shirt: '#d4cfbe', trousers: '#c8c2b0' } },
+
+  { id: 'vampire', name: 'Vampire',
+    wear: { hair: 'sidepart', top: 'oxford', bottom: 'suit',
+      outer: 'waistcoat', headwear: 'none', gloves: 'none',
+      footwear: 'brogues', face: 'goatee', back: 'cape' },
+    colours: { skin: '#e8e0da', hair: '#16121a', shirt: '#f2f0ec',
+      trousers: '#1a1a22', outer: '#2c1218', shoes: '#141014',
+      face: '#16121a', back: '#5c1420' } },
+
+  // The plaid shirt is the transformation story in one garment: he dressed
+  // as a man and the moon had other plans. ('ripped' is a pair of jeans,
+  // not a top — the first draft wore it here and the shirt never drew.)
+  { id: 'werewolf', name: 'Werewolf',
+    wear: { hair: 'shag', top: 'plaid', bottom: 'cutoffs', outer: 'none',
+      headwear: 'ears', gloves: 'none', footwear: 'none',
+      face: 'fullbeard', back: 'none' },
+    colours: { skin: '#8a6844', hair: '#3a2a1c', shirt: '#6a2822',
+      trousers: '#463826', headwear: '#3a2a1c', face: '#32241a' } },
+
+  { id: 'mummy', name: 'Mummy',
+    wear: { hair: 'none', top: 'tank', bottom: 'shorts', outer: 'none',
+      headwear: 'wrap', gloves: 'wraps', footwear: 'none',
+      face: 'facescarf', back: 'none' },
+    colours: { skin: '#c8bc9c', shirt: '#e2dabf', trousers: '#d8cfb4',
+      headwear: '#e8e0c8', gloves: '#e2dabf', face: '#dcd4ba' } },
+
+  { id: 'ghost', name: 'Ghost',
+    wear: { hair: 'long', top: 'robe', bottom: 'longskirt', outer: 'cloak',
+      headwear: 'none', gloves: 'none', footwear: 'none',
+      face: 'none', back: 'none' },
+    colours: { skin: '#dfe8ee', hair: '#cddae2', shirt: '#e8eff4',
+      trousers: '#dde6ec', outer: '#eef4f8' } },
+
+  { id: 'witch', name: 'Witch',
+    wear: { hair: 'longpart', top: 'robe', bottom: 'longskirt',
+      outer: 'wizard', headwear: 'none', gloves: 'none',
+      footwear: 'boots', face: 'none', back: 'none' },
+    colours: { skin: '#93a468', hair: '#241c26', shirt: '#2c2240',
+      trousers: '#241a34', outer: '#1f1830', shoes: '#181212' } },
+
+  { id: 'monster', name: 'The monster',
+    wear: { hair: 'flattop', top: 'work', bottom: 'trousers',
+      outer: 'none', headwear: 'none', gloves: 'none', footwear: 'steel',
+      face: 'scar', back: 'none' },
+    colours: { skin: '#7f9a70', hair: '#1a1816', shirt: '#2f3a2c',
+      trousers: '#2a2a2e', shoes: '#181412', face: '#3a4a34' } },
+
+  // Silver jumpsuit, not a green one — green flesh in green cloth was one
+  // creature-shaped blur. The goggles in near-black are the huge dark eyes,
+  // which is the one thing every drawing of an alien agrees on.
+  { id: 'alien', name: 'Alien',
+    wear: { hair: 'none', top: 'track', bottom: 'track', outer: 'none',
+      headwear: 'none', gloves: 'gloves', footwear: 'boots',
+      face: 'goggles', back: 'airtank' },
+    colours: { skin: '#a2c8a4', shirt: '#7a8290', trousers: '#6a7280',
+      gloves: '#565a62', shoes: '#3a3e46', face: '#0e1216',
+      back: '#c8ccd2' } },
+
+  { id: 'robot', name: 'Robot',
+    wear: { hair: 'none', top: 'mail', bottom: 'greaves',
+      outer: 'breastplate', headwear: 'helm', gloves: 'gauntlets',
+      footwear: 'steel', face: 'visorface', back: 'jetpack' },
+    colours: { skin: '#9aa2ad', shirt: '#8a929c', trousers: '#7d858f',
+      outer: '#aeb6c0', headwear: '#9aa2ad', gloves: '#7d858f',
+      shoes: '#5c626a', face: '#2ab4d4', back: '#8a929c' } },
+
+  { id: 'troll', name: 'Troll',
+    wear: { hair: 'dreads', top: 'tunic', bottom: 'cutoffs', outer: 'none',
+      headwear: 'band', gloves: 'none', footwear: 'none',
+      face: 'fullbeard', back: 'none' },
+    colours: { skin: '#74904e', hair: '#463620', shirt: '#66563a',
+      trousers: '#463c28', headwear: '#5a4426', face: '#3c2e1a' } },
+];
+
+
+export const outfit = (id) => OUTFITS.find((o) => o.id === id) || null;
 
 const byId = (list, id) => list.find((i) => i.id === id) || null;
 
@@ -1169,6 +1739,9 @@ export function item(catKey, id) {
  */
 export function dressUp(skin, wear, ctx) {
   for (const cat of CATEGORIES) {
+    // effects go through applyEffects, LAST and with a tick — fire is on top
+    // of the jacket, not under it
+    if (cat.multi) continue;
     const it = item(cat.key, (wear || {})[cat.key]);
     if (!it || !it.draw) continue;
     const chosen = (ctx.colours || {})[cat.colour];
@@ -1181,6 +1754,7 @@ export function dressUp(skin, wear, ctx) {
 /** Whether a category has anything on. */
 export function isWorn(wear, key) {
   const id = (wear || {})[key];
+  if (Array.isArray(id)) return id.length > 0;
   return !!id && id !== 'none' && id !== 'auto';
 }
 
