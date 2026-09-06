@@ -1,0 +1,10 @@
+[{
+  "relation": ["delegate_permission/common.handle_all_urls"],
+  "target": {
+    "namespace": "android_app",
+    "package_name": "io.github.gkerherve.kherveskins",
+    "sha256_cert_fingerprints": [
+      "0C:D6:E1:74:ED:0C:8A:C3:BA:C0:0E:2B:01:8B:38:71:A1:0D:E9:ED:04:DF:AE:2C:1A:29:C9:CA:92:4C:99:01"
+    ]
+  }
+}]
