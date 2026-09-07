@@ -1,7 +1,7 @@
 {
-  "name": "KherveSkins — photograph to Minecraft skin",
-  "short_name": "KherveSkins",
-  "description": "Turn a photograph into a Minecraft skin, adjust it on a live figure, paint it, and export the 64x64 PNG.",
+  "name": "FaceCraft — photograph to blocky skin",
+  "short_name": "FaceCraft",
+  "description": "Turn a photograph into a blocky game skin, adjust it on a live figure, paint it, and export the 64x64 PNG.",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",

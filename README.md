@@ -1,4 +1,4 @@
-# KherveSkins
+# FaceCraft
 
 Turn a photograph into a Minecraft skin.
 

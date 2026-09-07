@@ -1,4 +1,4 @@
-# KherveSkins — working notes for Claude
+# FaceCraft (formerly KherveSkins) — working notes for Claude
 
 ## Do what was asked, without asking to
 

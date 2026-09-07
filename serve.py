@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""KherveSkins: a static server, and a place to put the skins.
+"""FaceCraft: a static server, and a place to put the skins.
 
 The app is plain ES modules and runs from any static server — but not from a
 `file://` URL, because modules will not load from one. So there has to be a
@@ -151,7 +151,7 @@ def lan_address() -> str:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="serve KherveSkins")
+    ap = argparse.ArgumentParser(description="serve FaceCraft")
     ap.add_argument("--port", type=int, default=int(os.environ.get("PORT", PORT)))
     ap.add_argument("--open", action="store_true", help="open a browser at it")
     args = ap.parse_args()
@@ -165,7 +165,7 @@ def main() -> int:
         return 1
 
     url = f"http://localhost:{args.port}/"
-    print("KherveSkins")
+    print("FaceCraft")
     print(f"  here   {url}")
     print(f"  phone  http://{lan_address()}:{args.port}/   (same wifi)")
     print("  ctrl-c to stop")
